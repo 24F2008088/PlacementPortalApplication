@@ -7,6 +7,12 @@ import jwt
 import datetime
 from functools import wraps
 from flask import request, jsonify
+from celery import Celery
+from celery.schedules import crontab
+from tasks import export_student_applications_csv
+import redis
+import json
+
 
 app = Flask(__name__)
 
@@ -33,7 +39,148 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
-# --- API Endpoints Will Go Here ---
+# 5. Celery Configuration
+app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
+app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
+
+def make_celery(app):
+    celery = Celery(
+        app.import_name, 
+        backend=app.config['CELERY_RESULT_BACKEND'],
+        broker=app.config['CELERY_BROKER_URL']
+    )
+    celery.conf.update(app.config)
+    
+    # Ensure Celery tasks run within the Flask app context (crucial for DB access)
+    class ContextTask(celery.Task):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return self.run(*args, **kwargs)
+    
+    celery.Task = ContextTask
+    return celery
+
+celery = make_celery(app)
+
+# --- REDIS CACHE SETUP ---
+# decode_responses=True ensures we get normal strings back instead of byte data
+cache = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+
+# Ensure export directory exists for async tasks
+EXPORT_FOLDER = 'static/exports'
+os.makedirs(EXPORT_FOLDER, exist_ok=True)
+
+
+
+# PROTECTED API ENDPOINTS
+
+
+@app.route('/api/admin/stats', methods=['GET'])
+@token_required
+def get_admin_stats(current_user):
+    # Security Check
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    stats = {
+        'total_students': User.query.filter_by(role='student').count(),
+        'total_companies': User.query.filter_by(role='company').count(),
+        'total_drives': Drive.query.count(),
+        'total_applications': Application.query.count()
+    }
+    return jsonify({'status': 'success', 'data': stats}), 200
+
+
+@app.route('/api/student/drives', methods=['GET'])
+@token_required
+def get_approved_drives(current_user):
+    if current_user.role != 'student':
+        return jsonify({'message': 'Access denied. Students only.'}), 403
+        
+    # 1. Check the Redis Cache FIRST
+    cached_drives = cache.get('approved_drives')
+    
+    if cached_drives:
+        print("[CACHE HIT] Serving drives instantly from Redis!")
+        return jsonify({'status': 'success', 'data': json.loads(cached_drives)}), 200
+        
+    # 2. If nothing is in the cache (Cache Miss), query the SQLite database
+    print("[CACHE MISS] Fetching from SQLite database...")
+    drives = Drive.query.filter_by(status='Approved').all()
+    drives_data = [{
+        'id': d.id,
+        'job_title': d.job_title,
+        'company': d.company.username,
+        'description': d.description,
+        'eligibility': d.eligibility_criteria,
+        'deadline': d.deadline
+    } for d in drives]
+    
+    # 3. Save the result to Redis with an expiration time.
+  
+    cache.setex('approved_drives', 300, json.dumps(drives_data))
+    
+    return jsonify({'status': 'success', 'data': drives_data}), 200
+
+
+@app.route('/api/company/drive', methods=['POST'])
+@token_required
+def create_placement_drive(current_user):
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied. Companies only.'}), 403
+        
+    if not current_user.is_approved:
+        return jsonify({'message': 'Your company profile is pending admin approval.'}), 403
+        
+    data = request.get_json()
+    
+    new_drive = Drive(
+        company_id=current_user.id,
+        job_title=data.get('job_title'),
+        description=data.get('description'),
+        eligibility_criteria=data.get('eligibility'),
+        deadline=data.get('deadline'),
+        status='Pending'
+    )
+    
+    db.session.add(new_drive)
+    db.session.commit()
+    
+    return jsonify({'message': 'Placement drive created and pending admin approval.'}), 201
+
+# --- CELERY BEAT SCHEDULE ---
+celery.conf.beat_schedule = {
+    'daily-reminder-job': {
+        'task': 'send_daily_reminders',
+        'schedule': crontab(hour=9, minute=0), # Runs every day at 9:00 AM
+    },
+    'monthly-report-job': {
+        'task': 'generate_monthly_report',
+        'schedule': crontab(day_of_month=1, hour=10, minute=0), # Runs 1st of every month at 10:00 AM
+    }
+}
+
+# --- ASYNC TRIGGER ENDPOINT ---
+@app.route('/api/student/export', methods=['POST'])
+@token_required
+def trigger_csv_export(current_user):
+    if current_user.role != 'student':
+        return jsonify({'message': 'Access denied. Students only.'}), 403
+        
+    # Hand the task off to Celery in the background (.delay)
+    # The API responds immediately, not waiting for the CSV to finish
+    task = export_student_applications_csv.delay(current_user.id, current_user.username)
+    
+    return jsonify({
+        'message': 'CSV Export started in the background. You will be alerted when it is ready.',
+        'task_id': task.id
+    }), 202
+
+
+
+
+
+
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -148,68 +295,6 @@ def login():
     }), 200
 
 
-# PROTECTED API ENDPOINTS
-
-
-@app.route('/api/admin/stats', methods=['GET'])
-@token_required
-def get_admin_stats(current_user):
-    # Security Check
-    if current_user.role != 'admin':
-        return jsonify({'message': 'Access denied. Admins only.'}), 403
-        
-    stats = {
-        'total_students': User.query.filter_by(role='student').count(),
-        'total_companies': User.query.filter_by(role='company').count(),
-        'total_drives': Drive.query.count(),
-        'total_applications': Application.query.count()
-    }
-    return jsonify({'status': 'success', 'data': stats}), 200
-
-
-@app.route('/api/student/drives', methods=['GET'])
-@token_required
-def get_approved_drives(current_user):
-    if current_user.role != 'student':
-        return jsonify({'message': 'Access denied. Students only.'}), 403
-        
-    drives = Drive.query.filter_by(status='Approved').all()
-    drives_data = [{
-        'id': d.id,
-        'job_title': d.job_title,
-        'company': d.company.username,
-        'description': d.description,
-        'eligibility': d.eligibility_criteria,
-        'deadline': d.deadline
-    } for d in drives]
-    
-    return jsonify({'status': 'success', 'data': drives_data}), 200
-
-
-@app.route('/api/company/drive', methods=['POST'])
-@token_required
-def create_placement_drive(current_user):
-    if current_user.role != 'company':
-        return jsonify({'message': 'Access denied. Companies only.'}), 403
-        
-    if not current_user.is_approved:
-        return jsonify({'message': 'Your company profile is pending admin approval.'}), 403
-        
-    data = request.get_json()
-    
-    new_drive = Drive(
-        company_id=current_user.id,
-        job_title=data.get('job_title'),
-        description=data.get('description'),
-        eligibility_criteria=data.get('eligibility'),
-        deadline=data.get('deadline'),
-        status='Pending'
-    )
-    
-    db.session.add(new_drive)
-    db.session.commit()
-    
-    return jsonify({'message': 'Placement drive created and pending admin approval.'}), 201
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
