@@ -3,7 +3,7 @@ from datetime import datetime
 
 db = SQLAlchemy()
 
-# 1. Updated User Table (Admin, Companies, and Students)
+# 1. User Table (Admin, Companies, and Students)
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
@@ -17,7 +17,7 @@ class User(db.Model):
     contact_info = db.Column(db.String(15))
     branch = db.Column(db.String(50))
     cgpa = db.Column(db.Float)
-    resume_file = db.Column(db.String(200)) # Stores the filename of the uploaded PDF
+    resume_file = db.Column(db.String(200)) 
 
     # --- COMPANY SPECIFIC FIELDS ---
     hr_contact = db.Column(db.String(15))
@@ -44,6 +44,6 @@ class Application(db.Model):
     applied_date = db.Column(db.DateTime, default=datetime.utcnow) # For history tracking 
     status = db.Column(db.String(20), default='Applied') # Applied, Shortlisted, Selected, Rejected
     
-    # Establish relationship to access drive details from application object 
+    
     drive = db.relationship('Drive', backref='applications')
     student = db.relationship('User', backref='my_applications')
