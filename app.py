@@ -72,6 +72,36 @@ os.makedirs(EXPORT_FOLDER, exist_ok=True)
 
 
 
+
+
+# Decorator to check if the user has a valid JWT token
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+
+        # Token is sent in the Authorization header
+        if 'Authorization' in request.headers:
+            # Format: Bearer <token>
+            token = request.headers['Authorization'].split(" ")[1]
+
+        # No token means user is not logged in
+        if not token:
+            return jsonify({'message': 'Token is missing! Access denied.'}), 401
+
+        try:
+            # Decode the token and get the logged-in user
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+            current_user = User.query.get(data['user_id'])
+        except:
+            return jsonify({'message': 'Token is invalid or expired!'}), 401
+
+        # Pass the current user to the protected route
+        return f(current_user, *args, **kwargs)
+
+    return decorated
+
+
 # PROTECTED API ENDPOINTS
 
 
@@ -181,40 +211,6 @@ def trigger_csv_export(current_user):
 
 
 
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """A simple endpoint to test if the API is running."""
-    return jsonify({"status": "success", "message": "Placement API V2 is running smoothly!"}), 200
-
-
-
-# Decorator to check if the user has a valid JWT token
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-
-        # Token is sent in the Authorization header
-        if 'Authorization' in request.headers:
-            # Format: Bearer <token>
-            token = request.headers['Authorization'].split(" ")[1]
-
-        # No token means user is not logged in
-        if not token:
-            return jsonify({'message': 'Token is missing! Access denied.'}), 401
-
-        try:
-            # Decode the token and get the logged-in user
-            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-            current_user = User.query.get(data['user_id'])
-        except:
-            return jsonify({'message': 'Token is invalid or expired!'}), 401
-
-        # Pass the current user to the protected route
-        return f(current_user, *args, **kwargs)
-
-    return decorated
 
 
 # ------------------ Register User ------------------ #
