@@ -13,6 +13,7 @@ import json
 import csv
 import uuid
 from flask_mail import Mail, Message
+from werkzeug.utils import secure_filename
 
 
 app = Flask(__name__)
@@ -220,6 +221,40 @@ def reject_drive(current_user, drive_id):
 
 
 # --- STUDENT ROUTES ---
+
+@app.route('/api/student/upload_resume', methods=['POST'])
+@token_required
+def upload_resume(current_user):
+    if current_user.role != 'student':
+        return jsonify({'message': 'Access denied. Students only.'}), 403
+
+    # Check if a file was actually sent in the request
+    if 'resume' not in request.files:
+        return jsonify({'message': 'No file part in the request.'}), 400
+
+    file = request.files['resume']
+
+    if file.filename == '':
+        return jsonify({'message': 'No selected file.'}), 400
+
+    if file and file.filename.endswith('.pdf'):
+        # Clean the filename to prevent security issues and make it unique to the user
+        filename = secure_filename(f"user_{current_user.id}_resume.pdf")
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        # Save the file to the static/resumes folder
+        file.save(filepath)
+
+        # Save the resume path string to the database user object
+        current_user.resume_file = f"/static/resumes/{filename}"
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Resume uploaded successfully!',
+            'resume_url': current_user.resume_file
+        }), 200
+
+    return jsonify({'message': 'Invalid file type. Only PDFs are allowed.'}), 400
 
 @app.route('/api/student/drives', methods=['GET'])
 @token_required
