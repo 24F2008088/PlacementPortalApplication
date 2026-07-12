@@ -10,10 +10,8 @@
 
     <!-- Main Content Area -->
     <div class="container">
-      
-  
-
       <div class="row">
+        
         <!-- Left Column: Create Drive Form -->
         <div class="col-md-5 mb-4">
           <h4 class="mb-3">Create New Drive</h4>
@@ -44,7 +42,20 @@
 
         <!-- Right Column: Applicant Inbox -->
         <div class="col-md-7">
-          <h4 class="mb-3">Applicant Inbox</h4>
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0">Applicant Inbox</h4>
+            
+            <!-- NEW: The Celery Export Button -->
+            <!-- Hardcoded to drive ID 1 for testing purposes -->
+            <button 
+              class="btn btn-outline-warning btn-sm" 
+              @click="exportApplicants(1)"
+              :disabled="isExporting"
+            >
+              {{ isExporting ? 'Exporting...' : 'Export to CSV' }}
+            </button>
+          </div>
+          
           <div class="card shadow-sm bg-dark text-light border-secondary">
             <div class="card-body p-0">
               
@@ -66,7 +77,6 @@
                     <td class="fw-bold text-info align-middle">{{ app.student_name }}</td>
                     <td class="align-middle">{{ app.job_title }}</td>
                     <td class="align-middle">
-                      <!-- Badge changes color based on status -->
                       <span class="badge" 
                             :class="{
                               'bg-secondary': app.status === 'Applied',
@@ -77,7 +87,6 @@
                       </span>
                     </td>
                     <td class="align-middle">
-                      <!-- Only show buttons if a decision hasn't been made yet -->
                       <div v-if="app.status === 'Applied'" class="btn-group">
                         <button class="btn btn-outline-success btn-sm" @click="updateStatus(app.application_id, 'accept')">Accept</button>
                         <button class="btn btn-outline-danger btn-sm" @click="updateStatus(app.application_id, 'reject')">Reject</button>
@@ -106,12 +115,10 @@ const API_URL = 'http://127.0.0.1:5000/api'
 
 const form = ref({ role: '', description: '', min_cgpa: '', ctc: '' })
 const applicants = ref([])
-
+const isExporting = ref(false) // Tracks if Celery is currently running
 
 // 1. Post a new drive
 const createDrive = async () => {
-  errorMessage.value = ''
-  successMessage.value = ''
   try {
     const token = localStorage.getItem('token')
     const formattedData = {
@@ -125,11 +132,10 @@ const createDrive = async () => {
       headers: { Authorization: `Bearer ${token}` }
     })
     
-    successMessage.value = "Drive successfully created and pending admin approval!"
+    alert("Drive successfully created and pending admin approval!")
     form.value = { role: '', description: '', min_cgpa: '', ctc: '' }
     
   } catch (error) {
-    errorMessage.value = error.response?.data?.message || 'Failed to create drive.'
     if (error.response?.status === 401) handleLogout()
   }
 }
@@ -147,26 +153,65 @@ const fetchApplicants = async () => {
   }
 }
 
-// 3. NEW: Accept or Reject an applicant
+// 3. Accept or Reject an applicant
 const updateStatus = async (applicationId, action) => {
-  errorMessage.value = ''
-  successMessage.value = ''
-  
   try {
     const token = localStorage.getItem('token')
-    
-    // Choose the correct route based on which button was clicked
     const route = action === 'accept' ? 'accept_applicant' : 'reject_applicant'
     
-    const response = await axios.post(`${API_URL}/company/${route}/${applicationId}`, {}, {
+    await axios.post(`${API_URL}/company/${route}/${applicationId}`, {}, {
       headers: { Authorization: `Bearer ${token}` }
     })
     
-    successMessage.value = response.data.message
-    fetchApplicants() // Refresh the table to update the UI instantly
+    fetchApplicants() 
+  } catch (error) {
+    console.error(`Failed to ${action} student.`)
+  }
+}
+
+// 4. NEW: Trigger and Poll the Celery Background Task
+const exportApplicants = async (driveId) => {
+  isExporting.value = true
+  
+  try {
+    const token = localStorage.getItem('token')
+    const startResponse = await axios.post(`${API_URL}/company/export/${driveId}`, {}, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    
+    const taskId = startResponse.data.task_id
+    
+    // Step B: Ask Flask every 2 seconds if Celery is finished
+    const pollInterval = setInterval(async () => {
+      // NEW: We must wrap the polling request in its own try/catch!
+      try {
+        const statusResponse = await axios.get(`${API_URL}/company/export_status/${taskId}`)
+        
+        if (statusResponse.data.status === 'Ready') {
+          clearInterval(pollInterval)
+          isExporting.value = false
+          
+          const downloadUrl = statusResponse.data.download_url
+          const link = document.createElement('a')
+          link.href = downloadUrl
+          link.setAttribute('download', '') 
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+        } 
+      } catch (pollError) {
+        // If the server returns a 500 error, catch it, STOP the loop, and alert the user!
+        console.error("Polling error:", pollError)
+        clearInterval(pollInterval)
+        isExporting.value = false
+        alert("The background export task failed on the server.")
+      }
+    }, 2000)
     
   } catch (error) {
-    errorMessage.value = error.response?.data?.message || `Failed to ${action} student.`
+    console.error(error)
+    isExporting.value = false
+    alert("Failed to connect to export service.")
   }
 }
 
