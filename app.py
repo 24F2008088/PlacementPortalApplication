@@ -465,6 +465,32 @@ def send_status_email(student_username, company_name, job_title, status):
     mail.send(msg)
     return f"Email sent to {student_email}"
 
+@celery.task(name='app.send_daily_reminders')
+def send_daily_reminders():
+    # Count how many items need admin attention
+    pending_companies = User.query.filter_by(role='company', is_approved=False).count()
+    pending_drives = Drive.query.filter_by(status='Pending').count()
+    
+    # Only send the email if there is actually work to do
+    if pending_companies > 0 or pending_drives > 0:
+        subject = "Daily Admin Digest: Pending Approvals"
+        body = (
+            f"Good morning Admin,\n\n"
+            f"You have items waiting in the queue that require your approval:\n"
+            f"- {pending_companies} Pending Companies\n"
+            f"- {pending_drives} Pending Placement Drives\n\n"
+            f"Please log in to your Command Center to review them."
+        )
+        
+        # Sending to our default admin testing email
+        msg = Message(subject, recipients=['admin@placementportal.com'])
+        msg.body = body
+        mail.send(msg)
+        
+        return f"Daily reminder sent: {pending_companies} companies, {pending_drives} drives."
+    
+    return "No pending approvals today. Email skipped."
+
 
 # ------------------ Register User ------------------ #
 
