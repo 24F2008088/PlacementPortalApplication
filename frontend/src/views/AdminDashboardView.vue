@@ -1,70 +1,93 @@
 <template>
   <div>
-    <!-- Navbar -->
     <nav class="navbar navbar-expand-lg bg-body-tertiary mb-4 shadow-sm">
       <div class="container">
-        <span class="navbar-brand fw-bold">Placement Portal V2 | Admin</span>
+        <span class="navbar-brand fw-bold text-primary">Placement Portal V2 | Admin Command Center</span>
         <button class="btn btn-outline-danger btn-sm" @click="handleLogout">Logout</button>
       </div>
     </nav>
 
-    <!-- Main Content Area -->
     <div class="container">
-      <h2 class="mb-4">Admin Dashboard</h2>
       
-      <div v-if="errorMessage" class="alert alert-danger">{{ errorMessage }}</div>
-      <div v-if="successMessage" class="alert alert-success">{{ successMessage }}</div>
-
-      <!-- 1. Pending Company Approvals -->
-      <div class="card bg-dark text-light border-secondary mb-4 shadow-sm">
-        <div class="card-header border-secondary text-warning fw-bold">
-          Pending Company Approvals
-        </div>
-        <div class="card-body">
-          <div v-if="pendingCompanies.length === 0" class="text-muted">
-            No pending company approvals at this time.
+      <div class="row mb-5">
+        <div class="col-12">
+          <div class="card shadow-sm bg-dark border-secondary">
+            <div class="card-header border-secondary text-light fw-bold">
+              Platform Analytics Overview
+            </div>
+            <div class="card-body" style="height: 350px;">
+              <Bar
+                v-if="isChartLoaded"
+                id="my-chart-id"
+                :options="chartOptions"
+                :data="chartData"
+              />
+              <div v-else class="text-center text-muted mt-5">
+                Loading analytics...
+              </div>
+            </div>
           </div>
-          
-          <ul class="list-group list-group-flush">
-            <li v-for="company in pendingCompanies" :key="company.id" class="list-group-item bg-dark text-light border-secondary d-flex justify-content-between align-items-center">
-              <div>
-                <strong>{{ company.username }}</strong>
-                <span class="badge bg-secondary ms-2">Awaiting Approval</span>
-              </div>
-              <div class="btn-group">
-                <button class="btn btn-success btn-sm" @click="approveCompany(company.id)">Approve</button>
-                <button class="btn btn-danger btn-sm" @click="rejectCompany(company.id)">Reject</button>
-              </div>
-            </li>
-          </ul>
         </div>
       </div>
 
-      <!-- 2. NEW: Pending Drive Approvals -->
-      <div class="card bg-dark text-light border-secondary mb-4 shadow-sm">
-        <div class="card-header border-secondary text-info fw-bold">
-          Pending Placement Drives
-        </div>
-        <div class="card-body">
-          <div v-if="pendingDrives.length === 0" class="text-muted">
-            No pending placement drives at this time.
+      <div class="row">
+        <div class="col-md-6 mb-4">
+          <h5 class="mb-3">Pending Company Approvals</h5>
+          <div class="card shadow-sm bg-dark text-light border-secondary">
+            <div class="card-body p-0">
+              <div v-if="pendingCompanies.length === 0" class="p-4 text-muted text-center">
+                No pending companies.
+              </div>
+              <table v-else class="table table-dark table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Company Name</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="company in pendingCompanies" :key="company.id">
+                    <td class="align-middle fw-bold text-info">{{ company.username }}</td>
+                    <td class="text-end">
+                      <button class="btn btn-success btn-sm me-2" @click="handleCompany(company.id, 'approve')">Approve</button>
+                      <button class="btn btn-danger btn-sm" @click="handleCompany(company.id, 'reject')">Reject</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          
-          <ul class="list-group list-group-flush">
-            <li v-for="drive in pendingDrives" :key="drive.id" class="list-group-item bg-dark text-light border-secondary d-flex justify-content-between align-items-center">
-              <div>
-                <strong>{{ drive.job_title }}</strong>
-                <div class="text-muted small">{{ drive.description }}</div>
-              </div>
-              <div class="btn-group">
-                <button class="btn btn-success btn-sm" @click="approveDrive(drive.id)">Approve</button>
-                <button class="btn btn-danger btn-sm" @click="rejectDrive(drive.id)">Reject</button>
-              </div>
-            </li>
-          </ul>
         </div>
-      </div>
 
+        <div class="col-md-6 mb-4">
+          <h5 class="mb-3">Pending Drive Approvals</h5>
+          <div class="card shadow-sm bg-dark text-light border-secondary">
+            <div class="card-body p-0">
+              <div v-if="pendingDrives.length === 0" class="p-4 text-muted text-center">
+                No pending drives.
+              </div>
+              <table v-else class="table table-dark table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Job Title</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="drive in pendingDrives" :key="drive.id">
+                    <td class="align-middle text-warning fw-bold">{{ drive.job_title }}</td>
+                    <td class="text-end">
+                      <button class="btn btn-success btn-sm me-2" @click="handleDrive(drive.id, 'approve')">Approve</button>
+                      <button class="btn btn-danger btn-sm" @click="handleDrive(drive.id, 'reject')">Reject</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
     </div>
   </div>
 </template>
@@ -73,113 +96,129 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+// Import Chart.js components
+import { Bar } from 'vue-chartjs'
+import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js'
+
+// Register Chart.js elements
+ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale)
 
 const router = useRouter()
 const API_URL = 'http://127.0.0.1:5000/api'
 
+// --- State Variables ---
 const pendingCompanies = ref([])
 const pendingDrives = ref([])
-const errorMessage = ref('')
-const successMessage = ref('')
+const isChartLoaded = ref(false)
 
-// --- Company Functions ---
-const fetchPendingCompanies = async () => {
+// --- Chart Data & Configuration ---
+const chartData = ref({
+  labels: ['Students', 'Companies', 'Drives', 'Applications'],
+  datasets: [{
+    label: 'Total Count',
+    // Custom colors for each bar to make it pop!
+    backgroundColor: ['#42b883', '#ffc107', '#0dcaf0', '#0d6efd'],
+    data: [0, 0, 0, 0] 
+  }]
+})
+
+const chartOptions = ref({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false } // Hides the legend since the labels are self-explanatory
+  },
+  scales: {
+    y: {
+      beginAtZero: true,
+      ticks: { stepSize: 1, color: '#adb5bd' },
+      grid: { color: '#495057' }
+    },
+    x: {
+      ticks: { color: '#adb5bd' },
+      grid: { display: false }
+    }
+  }
+})
+
+// --- API Calls ---
+
+const fetchStats = async () => {
   try {
     const token = localStorage.getItem('token')
-    const response = await axios.get(`${API_URL}/admin/pending_companies`, {
+    const res = await axios.get(`${API_URL}/admin/stats`, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    pendingCompanies.value = response.data
+    
+    // Inject the real data from Flask into the chart
+    const stats = res.data.data
+    chartData.value.datasets[0].data = [
+      stats.total_students, 
+      stats.total_companies, 
+      stats.total_drives, 
+      stats.total_applications
+    ]
+    
+    // Tell Vue it is safe to render the chart now
+    isChartLoaded.value = true
   } catch (error) {
-    errorMessage.value = "Failed to load pending companies."
+    console.error("Failed to fetch stats", error)
     if (error.response?.status === 401) handleLogout()
   }
 }
 
-const approveCompany = async (companyId) => {
-  errorMessage.value = ''
-  successMessage.value = ''
+const fetchPending = async () => {
   try {
     const token = localStorage.getItem('token')
-    await axios.post(`${API_URL}/admin/approve_company/${companyId}`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    successMessage.value = "Company approved successfully!"
-    fetchPendingCompanies()
+    const config = { headers: { Authorization: `Bearer ${token}` } }
+    
+    const [compRes, driveRes] = await Promise.all([
+      axios.get(`${API_URL}/admin/pending_companies`, config),
+      axios.get(`${API_URL}/admin/pending_drives`, config)
+    ])
+    
+    pendingCompanies.value = compRes.data
+    pendingDrives.value = driveRes.data
   } catch (error) {
-    errorMessage.value = error.response?.data?.message || "Failed to approve company."
+    console.error("Failed to fetch pending requests", error)
   }
 }
 
-const rejectCompany = async (companyId) => {
-  if (!window.confirm("Are you sure you want to reject and delete this company?")) return;
-  errorMessage.value = ''
-  successMessage.value = ''
+const handleCompany = async (id, action) => {
   try {
     const token = localStorage.getItem('token')
-    await axios.post(`${API_URL}/admin/reject_company/${companyId}`, {}, {
+    await axios.post(`${API_URL}/admin/${action}_company/${id}`, {}, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    successMessage.value = "Company rejected and removed."
-    fetchPendingCompanies()
+    fetchPending() // Refresh the list
+    fetchStats()   // Refresh the chart!
   } catch (error) {
-    errorMessage.value = error.response?.data?.message || "Failed to reject company."
+    alert(`Failed to ${action} company.`)
   }
 }
 
-// --- Drive Functions ---
-const fetchPendingDrives = async () => {
+const handleDrive = async (id, action) => {
   try {
     const token = localStorage.getItem('token')
-    const response = await axios.get(`${API_URL}/admin/pending_drives`, {
+    await axios.post(`${API_URL}/admin/${action}_drive/${id}`, {}, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    pendingDrives.value = response.data
+    fetchPending()
+    fetchStats()
   } catch (error) {
-    errorMessage.value = "Failed to load pending drives."
+    alert(`Failed to ${action} drive.`)
   }
 }
-
-const approveDrive = async (driveId) => {
-  errorMessage.value = ''
-  successMessage.value = ''
-  try {
-    const token = localStorage.getItem('token')
-    await axios.post(`${API_URL}/admin/approve_drive/${driveId}`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    successMessage.value = "Drive approved successfully!"
-    fetchPendingDrives() // Refresh the list
-  } catch (error) {
-    errorMessage.value = error.response?.data?.message || "Failed to approve drive."
-  }
-}
-
-const rejectDrive = async (driveId) => {
-  if (!window.confirm("Are you sure you want to reject and delete this drive?")) return;
-  errorMessage.value = ''
-  successMessage.value = ''
-  try {
-    const token = localStorage.getItem('token')
-    await axios.post(`${API_URL}/admin/reject_drive/${driveId}`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    successMessage.value = "Drive rejected and removed."
-    fetchPendingDrives() // Refresh the list
-  } catch (error) {
-    errorMessage.value = error.response?.data?.message || "Failed to reject drive."
-  }
-}
-
-// Run both fetch functions when the page loads
-onMounted(() => {
-  fetchPendingCompanies()
-  fetchPendingDrives()
-})
 
 const handleLogout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('role')
   router.push('/login')
 }
+
+// Fetch everything when the page loads
+onMounted(() => {
+  fetchStats()
+  fetchPending()
+})
 </script>
