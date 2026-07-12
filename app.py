@@ -420,6 +420,28 @@ def apply_for_drive(current_user, drive_id):
     
     return jsonify({'message': 'Successfully applied to the placement drive!'}), 201
 
+@app.route('/api/student/my_applications', methods=['GET'])
+@token_required
+def get_my_applications(current_user):
+    if current_user.role != 'student':
+        return jsonify({'message': 'Access denied. Students only.'}), 403
+
+    # Find all applications for this specific student
+    applications = Application.query.filter_by(student_id=current_user.id).all()
+    
+    app_data = []
+    for app in applications:
+        drive = Drive.query.get(app.drive_id)
+        if drive:
+            app_data.append({
+                'application_id': app.id,
+                # Using our fallback just in case the company name isn't stored
+                'company_name': getattr(drive, 'company_name', 'Company'),
+                'job_title': drive.job_title,
+                'status': app.status
+            })
+            
+    return jsonify(app_data), 200
 
 #Company routes
 
