@@ -9,7 +9,7 @@ from functools import wraps
 from flask import request, jsonify
 from celery import Celery
 from celery.schedules import crontab
-from tasks import export_student_applications_csv
+#from tasks import export_student_applications_csv
 import redis
 import json
 
@@ -194,18 +194,18 @@ celery.conf.beat_schedule = {
 @app.route('/api/student/export', methods=['POST'])
 @token_required
 def trigger_csv_export(current_user):
-    if current_user.role != 'student':
-        return jsonify({'message': 'Access denied. Students only.'}), 403
-        
-    # Hand the task off to Celery in the background (.delay)
-    # The API responds immediately, not waiting for the CSV to finish
-    task = export_student_applications_csv.delay(current_user.id, current_user.username)
+    # if current_user.role != 'student':
+    #     return jsonify({'message': 'Access denied. Students only.'}), 403
     
-    return jsonify({
-        'message': 'CSV Export started in the background. You will be alerted when it is ready.',
-        'task_id': task.id
-    }), 202
-
+    # task = export_student_applications_csv.delay(current_user.id, current_user.username)
+    
+    # return jsonify({
+    #     'message': 'CSV Export started in the background. You will be alerted when it is ready.',
+    #     'task_id': task.id
+    # }), 202
+    
+    # Temporary return to keep the server happy
+    return jsonify({'message': 'Export feature temporarily disabled'}), 200
 
 
 
@@ -290,7 +290,197 @@ def login():
         'role': user.role
     }), 200
 
+# --- ADMIN ROUTES ---
 
+@app.route('/api/admin/pending_companies', methods=['GET'])
+@token_required
+def get_pending_companies(current_user):
+    # Security check: Only admins allowed
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+    
+    # Find all users who are companies AND have not been approved yet
+    companies = User.query.filter_by(role='company', is_approved=False).all()
+    
+    # Format the data to send back to Vue
+    companies_data = [{'id': c.id, 'username': c.username} for c in companies]
+    return jsonify(companies_data), 200
+
+
+@app.route('/api/admin/approve_company/<int:company_id>', methods=['POST'])
+@token_required
+def approve_company(current_user, company_id):
+    # Security check
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    company = User.query.get(company_id)
+    if not company:
+        return jsonify({'message': 'Company not found.'}), 404
+        
+    # Flip the switch to approve them!
+    company.is_approved = True
+    db.session.commit()
+    
+    return jsonify({'message': 'Company approved successfully!'}), 200
+
+@app.route('/api/admin/reject_company/<int:company_id>', methods=['POST'])
+@token_required
+def reject_company(current_user, company_id):
+    # Security check
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    company = User.query.get(company_id)
+    if not company:
+        return jsonify({'message': 'Company not found.'}), 404
+        
+    # Delete the rejected company from the database entirely
+    db.session.delete(company)
+    db.session.commit()
+    
+    return jsonify({'message': 'Company rejected and removed.'}), 200
+
+# --- ADMIN ROUTES FOR DRIVES ---
+
+@app.route('/api/admin/pending_drives', methods=['GET'])
+@token_required
+def get_pending_drives(current_user):
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+    
+    # Fetch all drives that are still marked as 'Pending'
+    drives = Drive.query.filter_by(status='Pending').all()
+    
+    drives_data = [{
+        'id': d.id, 
+        'job_title': d.job_title, 
+        'description': d.description
+    } for d in drives]
+    
+    return jsonify(drives_data), 200
+
+
+@app.route('/api/admin/approve_drive/<int:drive_id>', methods=['POST'])
+@token_required
+def approve_drive(current_user, drive_id):
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    drive = Drive.query.get(drive_id)
+    if not drive:
+        return jsonify({'message': 'Drive not found.'}), 404
+        
+    # Change the status so students can see it!
+    drive.status = 'Approved'
+    db.session.commit()
+    
+    return jsonify({'message': 'Drive approved successfully!'}), 200
+
+
+@app.route('/api/admin/reject_drive/<int:drive_id>', methods=['POST'])
+@token_required
+def reject_drive(current_user, drive_id):
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    drive = Drive.query.get(drive_id)
+    if not drive:
+        return jsonify({'message': 'Drive not found.'}), 404
+        
+    # Delete the rejected drive
+    db.session.delete(drive)
+    db.session.commit()
+    
+    return jsonify({'message': 'Drive rejected and removed.'}), 200
+
+# --- STUDENT ROUTES ---
+
+@app.route('/api/student/apply/<int:drive_id>', methods=['POST'])
+@token_required
+def apply_for_drive(current_user, drive_id):
+    # Security check
+    if current_user.role != 'student':
+        return jsonify({'message': 'Access denied. Students only.'}), 403
+        
+    # Check if the drive actually exists
+    drive = Drive.query.get(drive_id)
+    if not drive:
+        return jsonify({'message': 'Drive not found.'}), 404
+        
+    # Prevent duplicate applications
+    existing_application = Application.query.filter_by(student_id=current_user.id, drive_id=drive_id).first()
+    if existing_application:
+        return jsonify({'message': 'You have already applied for this drive!'}), 400
+        
+    # Create the new application
+    new_app = Application(student_id=current_user.id, drive_id=drive_id, status='Applied')
+    db.session.add(new_app)
+    db.session.commit()
+    
+    return jsonify({'message': 'Successfully applied to the placement drive!'}), 201
+
+
+#Company routes
+
+@app.route('/api/company/applicants', methods=['GET'])
+@token_required
+def get_company_applicants(current_user):
+    # Security check
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied. Companies only.'}), 403
+
+    # 1. Find all drives posted by this specific company
+    my_drives = Drive.query.filter_by(company_id=current_user.id).all()
+    
+    applicants_data = []
+    
+    # 2. Loop through the drives and find the students who applied
+    for drive in my_drives:
+        applications = Application.query.filter_by(drive_id=drive.id).all()
+        for app in applications:
+            # Look up the student's username
+            student = User.query.get(app.student_id)
+            
+            applicants_data.append({
+                'application_id': app.id,
+                'job_title': drive.job_title,
+                'student_name': student.username,
+                'status': app.status
+            })
+            
+    return jsonify(applicants_data), 200
+
+@app.route('/api/company/accept_applicant/<int:application_id>', methods=['POST'])
+@token_required
+def accept_applicant(current_user, application_id):
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied.'}), 403
+        
+    application = Application.query.get(application_id)
+    if not application:
+        return jsonify({'message': 'Application not found.'}), 404
+        
+    application.status = 'Accepted'
+    db.session.commit()
+    
+    return jsonify({'message': 'Student accepted!'}), 200
+
+
+@app.route('/api/company/reject_applicant/<int:application_id>', methods=['POST'])
+@token_required
+def reject_applicant(current_user, application_id):
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied.'}), 403
+        
+    application = Application.query.get(application_id)
+    if not application:
+        return jsonify({'message': 'Application not found.'}), 404
+        
+    application.status = 'Rejected'
+    db.session.commit()
+    
+    return jsonify({'message': 'Student rejected.'}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
