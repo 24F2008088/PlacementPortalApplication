@@ -12,6 +12,7 @@ import redis
 import json
 import csv
 import uuid
+from flask_mail import Mail, Message
 
 
 app = Flask(__name__)
@@ -32,6 +33,17 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 UPLOAD_FOLDER = 'static/resumes'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# --- EMAIL CONFIGURATION (Connecting to Mailpit) ---
+app.config['MAIL_SERVER'] = 'localhost'
+app.config['MAIL_PORT'] = 1025
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = False
+app.config['MAIL_USERNAME'] = None
+app.config['MAIL_PASSWORD'] = None
+app.config['MAIL_DEFAULT_SENDER'] = 'admin@placementportal.com'
+
+mail = Mail(app)
 
 # 4. Initialize Database
 db.init_app(app)
@@ -346,6 +358,11 @@ def accept_applicant(current_user, application_id):
     application.status = 'Accepted'
     db.session.commit()
     
+    # --- FIRE THE BACKGROUND EMAIL TASK ---
+    student = User.query.get(application.student_id)
+    drive = Drive.query.get(application.drive_id)
+    send_status_email.delay(student.username, current_user.username, drive.job_title, 'ACCEPTED 🎉')
+    
     return jsonify({'message': 'Student accepted!'}), 200
 
 
@@ -361,6 +378,11 @@ def reject_applicant(current_user, application_id):
         
     application.status = 'Rejected'
     db.session.commit()
+    
+    # --- FIRE THE BACKGROUND EMAIL TASK ---
+    student = User.query.get(application.student_id)
+    drive = Drive.query.get(application.drive_id)
+    send_status_email.delay(student.username, current_user.username, drive.job_title, 'REJECTED ❌')
     
     return jsonify({'message': 'Student rejected.'}), 200
 
@@ -428,6 +450,20 @@ def get_export_status(task_id):
         }), 200
     else:
         return jsonify({'status': 'Failed'}), 500
+    
+@celery.task(name='app.send_status_email')
+def send_status_email(student_username, company_name, job_title, status):
+    
+    student_email = f"{student_username.replace(' ', '').lower()}@student.edu"
+    
+    subject = f"Application Update: {company_name} - {job_title}"
+    body = f"Hello {student_username},\n\nYour application for the role of {job_title} at {company_name} has been marked as: {status}.\n\nLog in to your dashboard to view more details."
+    
+    msg = Message(subject, recipients=[student_email])
+    msg.body = body
+    
+    mail.send(msg)
+    return f"Email sent to {student_email}"
 
 
 # ------------------ Register User ------------------ #
