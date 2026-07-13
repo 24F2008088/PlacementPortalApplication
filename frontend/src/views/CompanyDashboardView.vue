@@ -49,7 +49,7 @@
             <!-- Hardcoded to drive ID 1 for testing purposes -->
             <button 
               class="btn btn-outline-warning btn-sm" 
-              @click="exportApplicants(1)"
+              @click="exportApplicants(drive.id)"
               :disabled="isExporting"
             >
               {{ isExporting ? 'Exporting...' : 'Export to CSV' }}

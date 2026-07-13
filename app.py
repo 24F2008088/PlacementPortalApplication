@@ -222,13 +222,45 @@ def reject_drive(current_user, drive_id):
 
 # --- STUDENT ROUTES ---
 
+@app.route('/api/student/profile', methods=['GET', 'POST'])
+@token_required
+def student_profile(current_user):
+    if current_user.role != 'student':
+        return jsonify({'message': 'Access denied. Students only.'}), 403
+        
+    
+    if request.method == 'GET':
+        return jsonify({
+            'full_name': current_user.full_name,
+            'contact_info': current_user.contact_info,
+            'branch': current_user.branch,
+            'cgpa': current_user.cgpa,
+            'resume_file': current_user.resume_file
+        }), 200
+        
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        current_user.full_name = data.get('full_name', current_user.full_name)
+        current_user.contact_info = data.get('contact_info', current_user.contact_info)
+        current_user.branch = data.get('branch', current_user.branch)
+        
+        
+        try:
+            current_user.cgpa = float(data.get('cgpa')) if data.get('cgpa') else current_user.cgpa
+        except ValueError:
+            return jsonify({'message': 'CGPA must be a number.'}), 400
+            
+        db.session.commit()
+        return jsonify({'message': 'Profile updated successfully!'}), 200
+
 @app.route('/api/student/upload_resume', methods=['POST'])
 @token_required
 def upload_resume(current_user):
     if current_user.role != 'student':
         return jsonify({'message': 'Access denied. Students only.'}), 403
 
-    # Check if a file was actually sent in the request
+    
     if 'resume' not in request.files:
         return jsonify({'message': 'No file part in the request.'}), 400
 
@@ -238,14 +270,14 @@ def upload_resume(current_user):
         return jsonify({'message': 'No selected file.'}), 400
 
     if file and file.filename.endswith('.pdf'):
-        # Clean the filename to prevent security issues and make it unique to the user
+        
         filename = secure_filename(f"user_{current_user.id}_resume.pdf")
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-        # Save the file to the static/resumes folder
+        
         file.save(filepath)
 
-        # Save the resume path string to the database user object
+        
         current_user.resume_file = f"/static/resumes/{filename}"
         db.session.commit()
 
@@ -262,14 +294,14 @@ def get_approved_drives(current_user):
     if current_user.role != 'student':
         return jsonify({'message': 'Access denied. Students only.'}), 403
         
-    # 1. Check the Redis Cache FIRST
+    
     cached_drives = cache.get('approved_drives')
     
     if cached_drives:
         print("[CACHE HIT] Serving drives instantly from Redis!")
         return jsonify({'status': 'success', 'data': json.loads(cached_drives)}), 200
         
-    # 2. If nothing is in the cache (Cache Miss), query the SQLite database
+    
     print("[CACHE MISS] Fetching from SQLite database...")
     drives = Drive.query.filter_by(status='Approved').all()
     drives_data = [{
@@ -277,11 +309,11 @@ def get_approved_drives(current_user):
         'job_title': d.job_title,
         'company': d.company.username,
         'description': d.description,
-        'eligibility': d.eligibility_criteria,
+        'eligibility_criteria': d.eligibility_criteria,
         'deadline': d.deadline
     } for d in drives]
     
-    # 3. Save the result to Redis with an expiration time.
+    
     cache.setex('approved_drives', 300, json.dumps(drives_data))
     
     return jsonify({'status': 'success', 'data': drives_data}), 200
@@ -320,11 +352,12 @@ def get_my_applications(current_user):
         drive = Drive.query.get(app.drive_id)
         if drive:
             app_data.append({
-                'application_id': app.id,
-                'company_name': getattr(drive, 'company_name', 'Company'),
-                'job_title': drive.job_title,
-                'status': app.status
-            })
+            'application_id': app.id,
+            'drive_id': app.drive_id,                
+            'company_name': drive.company.username, 
+            'job_title': drive.job_title,
+            'status': app.status
+        })
             
     return jsonify(app_data), 200
 
@@ -346,7 +379,7 @@ def create_placement_drive(current_user):
         company_id=current_user.id,
         job_title=data.get('job_title'),
         description=data.get('description'),
-        eligibility_criteria=data.get('eligibility'),
+        eligibility_criteria=data.get('eligibility_criteria'),
         deadline=data.get('deadline'),
         status='Pending'
     )

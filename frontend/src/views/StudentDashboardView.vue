@@ -11,32 +11,74 @@
       
       <div class="row mb-4">
         <div class="col-12">
-          <div class="card shadow-sm p-4 bg-dark text-light border-secondary">
-            <h5 class="text-info mb-3">Your Professional Resume</h5>
-            <div class="d-flex align-items-center gap-3">
-              <input 
-                type="file" 
-                class="form-control form-control-sm bg-secondary text-light border-0 w-50" 
-                accept=".pdf" 
-                @change="handleFileSelect"
-              />
-              <button 
-                class="btn btn-primary btn-sm px-4" 
-                @click="uploadResume" 
-                :disabled="!selectedFile || isUploading"
-              >
-                {{ isUploading ? 'Uploading...' : 'Upload PDF' }}
+          <div class="card shadow-sm bg-dark text-light border-secondary">
+            <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+              <h5 class="mb-0 text-info">My Professional Profile</h5>
+              <button class="btn btn-sm btn-outline-light" @click="isEditing = !isEditing">
+                {{ isEditing ? 'Cancel Edit' : 'Edit Profile' }}
               </button>
             </div>
             
-            <div v-if="currentResumeUrl" class="mt-3 text-muted small">
-              Active Resume: 
-              <a :href="'http://127.0.0.1:5000' + currentResumeUrl" target="_blank" class="text-warning text-decoration-none fw-bold ms-1">
-                View Uploaded Document
-              </a>
-            </div>
-            <div v-else class="mt-3 text-muted small">
-              No resume uploaded yet. Please upload a PDF to complete your profile.
+            <div class="card-body">
+              <div v-if="!isEditing" class="row mb-4">
+                <div class="col-md-3"><strong>Full Name:</strong> {{ profile.full_name || 'Not set' }}</div>
+                <div class="col-md-3"><strong>Branch:</strong> {{ profile.branch || 'Not set' }}</div>
+                <div class="col-md-3"><strong>CGPA:</strong> <span class="text-warning fw-bold">{{ profile.cgpa || 'Not set' }}</span></div>
+                <div class="col-md-3"><strong>Contact:</strong> {{ profile.contact_info || 'Not set' }}</div>
+              </div>
+
+              <div v-else class="row mb-4 bg-secondary p-3 rounded">
+                <div class="col-md-3 mb-2">
+                  <label class="form-label small">Full Name</label>
+                  <input type="text" v-model="editForm.full_name" class="form-control form-control-sm bg-dark text-light border-0">
+                </div>
+                <div class="col-md-3 mb-2">
+                  <label class="form-label small">Branch</label>
+                  <input type="text" v-model="editForm.branch" class="form-control form-control-sm bg-dark text-light border-0">
+                </div>
+                <div class="col-md-3 mb-2">
+                  <label class="form-label small">Current CGPA</label>
+                  <input type="number" step="0.01" v-model="editForm.cgpa" class="form-control form-control-sm bg-dark text-light border-0">
+                </div>
+                <div class="col-md-3 mb-2">
+                  <label class="form-label small">Contact Info</label>
+                  <input type="text" v-model="editForm.contact_info" class="form-control form-control-sm bg-dark text-light border-0">
+                </div>
+                <div class="col-12 mt-2 text-end">
+                  <button class="btn btn-success btn-sm px-4" @click="saveProfile" :disabled="isSaving">
+                    {{ isSaving ? 'Saving...' : 'Save Profile' }}
+                  </button>
+                </div>
+              </div>
+
+              <hr class="border-secondary">
+
+              <h6 class="text-light mb-3">Resume Document</h6>
+              <div class="d-flex align-items-center gap-3">
+                <input 
+                  type="file" 
+                  class="form-control form-control-sm bg-secondary text-light border-0 w-50" 
+                  accept=".pdf" 
+                  @change="handleFileSelect"
+                />
+                <button 
+                  class="btn btn-primary btn-sm px-4" 
+                  @click="uploadResume" 
+                  :disabled="!selectedFile || isUploading"
+                >
+                  {{ isUploading ? 'Uploading...' : 'Upload PDF' }}
+                </button>
+              </div>
+              
+              <div v-if="currentResumeUrl" class="mt-3 text-muted small">
+                Active Resume: 
+                <a :href="'http://127.0.0.1:5000' + currentResumeUrl" target="_blank" class="text-warning text-decoration-none fw-bold ms-1">
+                  View Uploaded Document
+                </a>
+              </div>
+              <div v-else class="mt-3 text-danger small">
+                * No resume uploaded. A PDF is required for most applications.
+              </div>
             </div>
           </div>
         </div>
@@ -56,7 +98,7 @@
                   <tr>
                     <th>Company</th>
                     <th>Role</th>
-                    <th>Deadline</th>
+                    <th>Req. CGPA</th>
                     <th class="text-end">Action</th>
                   </tr>
                 </thead>
@@ -64,11 +106,34 @@
                   <tr v-for="drive in drives" :key="drive.id">
                     <td class="align-middle fw-bold text-success">{{ drive.company }}</td>
                     <td class="align-middle">{{ drive.job_title }}</td>
-                    <td class="align-middle text-muted">{{ drive.deadline }}</td>
-                    <td class="text-end">
-                      <button class="btn btn-outline-info btn-sm" @click="applyForDrive(drive.id)">
+                    <td class="align-middle text-warning">{{ drive.eligibility_criteria || 'None' }}</td>
+                    <td class="text-end align-middle">
+                      
+                      <button 
+                        v-if="hasApplied(drive.id)" 
+                        class="btn btn-sm btn-success text-light" 
+                        disabled
+                      >
+                        <i class="bi bi-check-circle me-1"></i> Already Applied
+                      </button>
+
+                      <button 
+                        v-else-if="!isEligible(drive.eligibility_criteria)" 
+                        class="btn btn-sm btn-outline-secondary" 
+                        disabled 
+                        title="Your CGPA does not meet the requirement"
+                      >
+                        Ineligible
+                      </button>
+
+                      <button 
+                        v-else 
+                        class="btn btn-sm btn-outline-info" 
+                        @click="applyForDrive(drive.id)"
+                      >
                         Apply Now
                       </button>
+
                     </td>
                   </tr>
                 </tbody>
@@ -126,11 +191,50 @@ const API_URL = 'http://127.0.0.1:5000/api'
 // --- State Variables ---
 const drives = ref([])
 const applications = ref([])
+
+// Profile State
+const profile = ref({ full_name: '', branch: '', cgpa: '', contact_info: '' })
+const editForm = ref({ full_name: '', branch: '', cgpa: '', contact_info: '' })
+const isEditing = ref(false)
+const isSaving = ref(false)
+
+// Resume State
 const selectedFile = ref(null)
 const isUploading = ref(false)
 const currentResumeUrl = ref('') 
 
-// --- API Calls ---
+// --- Core API Calls ---
+
+const fetchProfile = async () => {
+  try {
+    const token = localStorage.getItem('token')
+    const res = await axios.get(`${API_URL}/student/profile`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    profile.value = res.data
+    editForm.value = { ...res.data } // Pre-fill edit form
+    currentResumeUrl.value = res.data.resume_file || ''
+  } catch (error) {
+    console.error("Failed to fetch profile", error)
+  }
+}
+
+const saveProfile = async () => {
+  isSaving.value = true
+  try {
+    const token = localStorage.getItem('token')
+    await axios.post(`${API_URL}/student/profile`, editForm.value, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    // Update local state without full reload
+    profile.value = { ...editForm.value }
+    isEditing.value = false
+  } catch (error) {
+    alert(error.response?.data?.message || "Failed to save profile.")
+  } finally {
+    isSaving.value = false
+  }
+}
 
 const fetchDrives = async () => {
   try {
@@ -155,6 +259,24 @@ const fetchApplications = async () => {
   } catch (error) {
     console.error("Failed to fetch applications", error)
   }
+}
+
+// --- Status & Guardrail Logic ---
+
+const isEligible = (criteria) => {
+  if (!criteria) return true
+  if (!profile.value.cgpa) return false 
+
+  const requiredCgpa = parseFloat(criteria)
+  const studentCgpa = parseFloat(profile.value.cgpa)
+
+  if (isNaN(requiredCgpa)) return true 
+  
+  return studentCgpa >= requiredCgpa
+}
+
+const hasApplied = (driveId) => {
+  return applications.value.some(app => app.drive_id === driveId)
 }
 
 const applyForDrive = async (driveId) => {
@@ -212,6 +334,7 @@ const handleLogout = () => {
 }
 
 onMounted(() => {
+  fetchProfile()
   fetchDrives()
   fetchApplications()
 })
