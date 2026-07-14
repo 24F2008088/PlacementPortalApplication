@@ -15,27 +15,21 @@ import uuid
 from flask_mail import Mail, Message
 from werkzeug.utils import secure_filename
 
-
 app = Flask(__name__)
 
-# 1. Enable CORS so the VueJS frontend can communicate with this API
+# Core configurations
 CORS(app)
-
-# 2. Initialize Bcrypt for password hashing
 bcrypt = Bcrypt(app)
 
-# 3. Configuration
-# NEVER hardcode a real secret key in production, but this is fine for local dev
 app.config['SECRET_KEY'] = 'super_secret_jwt_key_v2'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///placement.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Resume Upload Folder Setup
 UPLOAD_FOLDER = 'static/resumes'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# --- EMAIL CONFIGURATION (Connecting to Mailpit) ---
+# Mailpit setup
 app.config['MAIL_SERVER'] = 'localhost'
 app.config['MAIL_PORT'] = 1025
 app.config['MAIL_USE_TLS'] = False
@@ -46,20 +40,18 @@ app.config['MAIL_DEFAULT_SENDER'] = 'admin@placementportal.com'
 
 mail = Mail(app)
 
-# 4. Initialize Database
+# Init DB
 db.init_app(app)
-
 with app.app_context():
     db.create_all()
 
-# 5. Celery Configuration
+# Celery & Redis setup
 app.config['broker_url'] = 'redis://localhost:6379/0'
 app.config['result_backend'] = 'redis://localhost:6379/0'
 
 def make_celery(app):
     celery = Celery(
         app.import_name, 
-        
         backend=app.config['result_backend'],
         broker=app.config['broker_url']
     )
@@ -74,51 +66,39 @@ def make_celery(app):
     return celery
 
 celery = make_celery(app)
-
-# --- REDIS CACHE SETUP ---
-# decode_responses=True ensures we get normal strings back instead of byte data
 cache = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
-# Force Python to use the absolute path of your specific machine
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 EXPORT_FOLDER = os.path.join(BASE_DIR, 'static', 'exports')
 os.makedirs(EXPORT_FOLDER, exist_ok=True)
 
 
-# Decorator to check if the user has a valid JWT token
+# JWT Auth Decorator
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         token = None
-
-        # Token is sent in the Authorization header
         if 'Authorization' in request.headers:
-            # Format: Bearer <token>
             token = request.headers['Authorization'].split(" ")[1]
 
-        # No token means user is not logged in
         if not token:
             return jsonify({'message': 'Token is missing! Access denied.'}), 401
 
         try:
-            # Decode the token and get the logged-in user
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
             current_user = User.query.get(data['user_id'])
         except:
             return jsonify({'message': 'Token is invalid or expired!'}), 401
 
-        # Pass the current user to the protected route
         return f(current_user, *args, **kwargs)
-
     return decorated
 
 
-# --- ADMIN ROUTES ---
+# --- Admin Routes ---
 
 @app.route('/api/admin/stats', methods=['GET'])
 @token_required
 def get_admin_stats(current_user):
-    # Security Check
     if current_user.role != 'admin':
         return jsonify({'message': 'Access denied. Admins only.'}), 403
         
@@ -140,7 +120,6 @@ def get_pending_companies(current_user):
     companies_data = [{'id': c.id, 'username': c.username} for c in companies]
     return jsonify(companies_data), 200
 
-
 @app.route('/api/admin/approve_company/<int:company_id>', methods=['POST'])
 @token_required
 def approve_company(current_user, company_id):
@@ -153,7 +132,6 @@ def approve_company(current_user, company_id):
         
     company.is_approved = True
     db.session.commit()
-    
     return jsonify({'message': 'Company approved successfully!'}), 200
 
 @app.route('/api/admin/reject_company/<int:company_id>', methods=['POST'])
@@ -168,9 +146,7 @@ def reject_company(current_user, company_id):
         
     db.session.delete(company)
     db.session.commit()
-    
     return jsonify({'message': 'Company rejected and removed.'}), 200
-
 
 @app.route('/api/admin/pending_drives', methods=['GET'])
 @token_required
@@ -184,9 +160,7 @@ def get_pending_drives(current_user):
         'job_title': d.job_title, 
         'description': d.description
     } for d in drives]
-    
     return jsonify(drives_data), 200
-
 
 @app.route('/api/admin/approve_drive/<int:drive_id>', methods=['POST'])
 @token_required
@@ -200,9 +174,8 @@ def approve_drive(current_user, drive_id):
         
     drive.status = 'Approved'
     db.session.commit()
-    
+    cache.delete('approved_drives')
     return jsonify({'message': 'Drive approved successfully!'}), 200
-
 
 @app.route('/api/admin/reject_drive/<int:drive_id>', methods=['POST'])
 @token_required
@@ -216,11 +189,11 @@ def reject_drive(current_user, drive_id):
         
     db.session.delete(drive)
     db.session.commit()
-    
+    cache.delete('approved_drives')
     return jsonify({'message': 'Drive rejected and removed.'}), 200
 
 
-# --- STUDENT ROUTES ---
+# --- Student Routes ---
 
 @app.route('/api/student/profile', methods=['GET', 'POST'])
 @token_required
@@ -228,7 +201,6 @@ def student_profile(current_user):
     if current_user.role != 'student':
         return jsonify({'message': 'Access denied. Students only.'}), 403
         
-    
     if request.method == 'GET':
         return jsonify({
             'full_name': current_user.full_name,
@@ -238,13 +210,11 @@ def student_profile(current_user):
             'resume_file': current_user.resume_file
         }), 200
         
-    
     if request.method == 'POST':
         data = request.get_json()
         current_user.full_name = data.get('full_name', current_user.full_name)
         current_user.contact_info = data.get('contact_info', current_user.contact_info)
         current_user.branch = data.get('branch', current_user.branch)
-        
         
         try:
             current_user.cgpa = float(data.get('cgpa')) if data.get('cgpa') else current_user.cgpa
@@ -260,23 +230,17 @@ def upload_resume(current_user):
     if current_user.role != 'student':
         return jsonify({'message': 'Access denied. Students only.'}), 403
 
-    
     if 'resume' not in request.files:
         return jsonify({'message': 'No file part in the request.'}), 400
 
     file = request.files['resume']
-
     if file.filename == '':
         return jsonify({'message': 'No selected file.'}), 400
 
     if file and file.filename.endswith('.pdf'):
-        
         filename = secure_filename(f"user_{current_user.id}_resume.pdf")
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-
-        
         file.save(filepath)
-
         
         current_user.resume_file = f"/static/resumes/{filename}"
         db.session.commit()
@@ -294,15 +258,10 @@ def get_approved_drives(current_user):
     if current_user.role != 'student':
         return jsonify({'message': 'Access denied. Students only.'}), 403
         
-    
     cached_drives = cache.get('approved_drives')
-    
     if cached_drives:
-        print("[CACHE HIT] Serving drives instantly from Redis!")
         return jsonify({'status': 'success', 'data': json.loads(cached_drives)}), 200
         
-    
-    print("[CACHE MISS] Fetching from SQLite database...")
     drives = Drive.query.filter_by(status='Approved').all()
     drives_data = [{
         'id': d.id,
@@ -310,14 +269,12 @@ def get_approved_drives(current_user):
         'company': d.company.username,
         'description': d.description,
         'eligibility_criteria': d.eligibility_criteria,
+        'ctc': d.ctc,
         'deadline': d.deadline
     } for d in drives]
     
-    
     cache.setex('approved_drives', 300, json.dumps(drives_data))
-    
     return jsonify({'status': 'success', 'data': drives_data}), 200
-
 
 @app.route('/api/student/apply/<int:drive_id>', methods=['POST'])
 @token_required
@@ -336,7 +293,6 @@ def apply_for_drive(current_user, drive_id):
     new_app = Application(student_id=current_user.id, drive_id=drive_id, status='Applied')
     db.session.add(new_app)
     db.session.commit()
-    
     return jsonify({'message': 'Successfully applied to the placement drive!'}), 201
 
 @app.route('/api/student/my_applications', methods=['GET'])
@@ -346,7 +302,6 @@ def get_my_applications(current_user):
         return jsonify({'message': 'Access denied. Students only.'}), 403
 
     applications = Application.query.filter_by(student_id=current_user.id).all()
-    
     app_data = []
     for app in applications:
         drive = Drive.query.get(app.drive_id)
@@ -362,7 +317,58 @@ def get_my_applications(current_user):
     return jsonify(app_data), 200
 
 
-# --- COMPANY ROUTES ---
+# --- Company Routes ---
+
+@app.route('/api/company/stats', methods=['GET'])
+@token_required
+def get_company_stats(current_user):
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied.'}), 403
+        
+    drives = Drive.query.filter_by(company_id=current_user.id).all()
+    drive_ids = [d.id for d in drives]
+    
+    total_applicants = 0
+    total_hired = 0
+    if drive_ids:
+        total_applicants = Application.query.filter(Application.drive_id.in_(drive_ids)).count()
+        total_hired = Application.query.filter(Application.drive_id.in_(drive_ids), Application.status == 'Accepted').count()
+        
+    return jsonify({
+        'total_drives': len(drives),
+        'total_applicants': total_applicants,
+        'total_hired': total_hired
+    }), 200
+
+@app.route('/api/company/my_drives', methods=['GET'])
+@token_required
+def get_my_drives(current_user):
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied.'}), 403
+    drives = Drive.query.filter_by(company_id=current_user.id).all()
+    return jsonify([{'id': d.id, 'job_title': d.job_title, 'status': d.status} for d in drives]), 200
+
+@app.route('/api/company/profile', methods=['GET', 'POST'])
+@token_required
+def company_profile(current_user):
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied.'}), 403
+        
+    if request.method == 'GET':
+        return jsonify({
+            'description': current_user.description or '',
+            'industry': current_user.industry or '',
+            'website': current_user.website or ''
+        }), 200
+        
+    if request.method == 'POST':
+        data = request.get_json()
+        current_user.description = data.get('description', current_user.description)
+        current_user.industry = data.get('industry', current_user.industry)
+        current_user.website = data.get('website', current_user.website)
+        db.session.commit()
+        return jsonify({'message': 'Profile updated successfully!'}), 200
+
 
 @app.route('/api/company/drive', methods=['POST'])
 @token_required
@@ -374,20 +380,19 @@ def create_placement_drive(current_user):
         return jsonify({'message': 'Your company profile is pending admin approval.'}), 403
         
     data = request.get_json()
-    
     new_drive = Drive(
         company_id=current_user.id,
         job_title=data.get('job_title'),
         description=data.get('description'),
         eligibility_criteria=data.get('eligibility_criteria'),
+        ctc=data.get('ctc'),
         deadline=data.get('deadline'),
         status='Pending'
     )
-    
     db.session.add(new_drive)
     db.session.commit()
-    
     return jsonify({'message': 'Placement drive created and pending admin approval.'}), 201
+
 
 
 @app.route('/api/company/applicants', methods=['GET'])
@@ -406,12 +411,16 @@ def get_company_applicants(current_user):
             applicants_data.append({
                 'application_id': app.id,
                 'job_title': drive.job_title,
-                'student_name': student.username,
-                'status': app.status
+                'student_name': student.full_name or student.username,
+                'branch': student.branch or 'Not provided',
+                'cgpa': student.cgpa or 'N/A',
+                'contact_info': student.contact_info or 'Not provided',
+                'resume_file': student.resume_file,
+                'status': app.status,
+                'drive_id': drive.id
             })
             
     return jsonify(applicants_data), 200
-
 
 @app.route('/api/company/accept_applicant/<int:application_id>', methods=['POST'])
 @token_required
@@ -426,13 +435,11 @@ def accept_applicant(current_user, application_id):
     application.status = 'Accepted'
     db.session.commit()
     
-    # --- FIRE THE BACKGROUND EMAIL TASK ---
     student = User.query.get(application.student_id)
     drive = Drive.query.get(application.drive_id)
     send_status_email.delay(student.username, current_user.username, drive.job_title, 'ACCEPTED 🎉')
     
     return jsonify({'message': 'Student accepted!'}), 200
-
 
 @app.route('/api/company/reject_applicant/<int:application_id>', methods=['POST'])
 @token_required
@@ -447,7 +454,6 @@ def reject_applicant(current_user, application_id):
     application.status = 'Rejected'
     db.session.commit()
     
-    # --- FIRE THE BACKGROUND EMAIL TASK ---
     student = User.query.get(application.student_id)
     drive = Drive.query.get(application.drive_id)
     send_status_email.delay(student.username, current_user.username, drive.job_title, 'REJECTED ❌')
@@ -455,41 +461,35 @@ def reject_applicant(current_user, application_id):
     return jsonify({'message': 'Student rejected.'}), 200
 
 
-# --- CELERY BEAT SCHEDULE ---
+# --- Background Tasks & Email Routing ---
+
 celery.conf.beat_schedule = {
     'daily-reminder-job': {
         'task': 'send_daily_reminders',
-        'schedule': crontab(hour=9, minute=0), # Runs every day at 9:00 AM
+        'schedule': crontab(hour=9, minute=0), 
     },
     'monthly-report-job': {
         'task': 'generate_monthly_report',
-        'schedule': crontab(day_of_month=1, hour=10, minute=0), # Runs 1st of every month at 10:00 AM
+        'schedule': crontab(day_of_month=1, hour=10, minute=0), 
     }
 }
-
-
-# --- NEW CELERY BACKGROUND TASKS & ROUTES FOR CSV EXPORT ---
 
 @celery.task(name='app.export_applicants_task')
 def export_applicants_task(drive_id):
     applications = Application.query.filter_by(drive_id=drive_id).all()
     
-    # Generate a unique filename using your existing EXPORT_FOLDER
     filename = f"applicants_drive_{drive_id}_{uuid.uuid4().hex[:6]}.csv"
     filepath = os.path.join(EXPORT_FOLDER, filename)
     
-    # Write the data to the CSV file
     with open(filepath, 'w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Student Name', 'Status']) # CSV Headers
+        writer.writerow(['Student Name', 'Status']) 
         
         for app_record in applications:
             student = User.query.get(app_record.student_id)
             writer.writerow([student.username, app_record.status])
             
-    # Return the static URL path so the frontend can download it
     return f"/static/exports/{filename}"
-
 
 @app.route('/api/company/export/<int:drive_id>', methods=['POST'])
 @token_required
@@ -497,21 +497,16 @@ def trigger_company_export(current_user, drive_id):
     if current_user.role != 'company':
         return jsonify({'message': 'Access denied.'}), 403
         
-    # Send the task to Redis!
     task = export_applicants_task.delay(drive_id)
-    
     return jsonify({'message': 'Export started!', 'task_id': task.id}), 202
-
 
 @app.route('/api/company/export_status/<task_id>', methods=['GET'])
 def get_export_status(task_id):
-    # Ask Redis for the task status
     task = celery.AsyncResult(task_id)
     
     if task.state == 'PENDING' or task.state == 'STARTED':
         return jsonify({'status': 'Processing'}), 202
     elif task.state == 'SUCCESS':
-        # Send the complete download URL back to Vue
         return jsonify({
             'status': 'Ready', 
             'download_url': f"http://127.0.0.1:5000{task.result}"
@@ -521,7 +516,6 @@ def get_export_status(task_id):
     
 @celery.task(name='app.send_status_email')
 def send_status_email(student_username, company_name, job_title, status):
-    
     student_email = f"{student_username.replace(' ', '').lower()}@student.edu"
     
     subject = f"Application Update: {company_name} - {job_title}"
@@ -529,17 +523,14 @@ def send_status_email(student_username, company_name, job_title, status):
     
     msg = Message(subject, recipients=[student_email])
     msg.body = body
-    
     mail.send(msg)
     return f"Email sent to {student_email}"
 
 @celery.task(name='app.send_daily_reminders')
 def send_daily_reminders():
-    # Count how many items need admin attention
     pending_companies = User.query.filter_by(role='company', is_approved=False).count()
     pending_drives = Drive.query.filter_by(status='Pending').count()
     
-    # Only send the email if there is actually work to do
     if pending_companies > 0 or pending_drives > 0:
         subject = "Daily Admin Digest: Pending Approvals"
         body = (
@@ -550,17 +541,15 @@ def send_daily_reminders():
             f"Please log in to your Command Center to review them."
         )
         
-        # Sending to our default admin testing email
         msg = Message(subject, recipients=['admin@placementportal.com'])
         msg.body = body
         mail.send(msg)
-        
         return f"Daily reminder sent: {pending_companies} companies, {pending_drives} drives."
     
     return "No pending approvals today. Email skipped."
 
 
-# ------------------ Register User ------------------ #
+# --- Authentication Routes ---
 
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -586,9 +575,6 @@ def register():
     db.session.commit()
 
     return jsonify({'message': 'User registered successfully!'}), 201
-
-
-# ------------------ Login User ------------------ #
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -619,7 +605,6 @@ def login():
         'token': token,
         'role': user.role
     }), 200
-
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

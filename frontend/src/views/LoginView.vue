@@ -24,6 +24,7 @@
           <select class="form-select" v-model="role">
             <option value="student">Student</option>
             <option value="company">Company</option>
+            <option value="admin">Admin</option>
           </select>
         </div>
 

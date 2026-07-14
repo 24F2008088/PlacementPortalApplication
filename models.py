@@ -1,49 +1,61 @@
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
 
 db = SQLAlchemy()
 
-# 1. User Table (Admin, Companies, and Students)
 class User(db.Model):
+    __tablename__ = 'user'
+    
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(50), nullable=False)
-    role = db.Column(db.String(20), nullable=False) # 'admin', 'company', or 'student'
-    is_approved = db.Column(db.Boolean, default=False) 
-    is_blacklisted = db.Column(db.Boolean, default=False) 
-
-    # --- STUDENT SPECIFIC FIELDS ---
-    full_name = db.Column(db.String(100))
-    contact_info = db.Column(db.String(15))
-    branch = db.Column(db.String(50))
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(20), nullable=False) # 'admin', 'student', 'company'
+    
+    
+    is_approved = db.Column(db.Boolean, default=False)
+    is_blacklisted = db.Column(db.Boolean, default=False)
+    
+    
+    full_name = db.Column(db.String(150))
+    contact_info = db.Column(db.String(150))
+    branch = db.Column(db.String(100))
     cgpa = db.Column(db.Float)
-    resume_file = db.Column(db.String(200)) 
+    resume_file = db.Column(db.String(255))
+    
 
-    # --- COMPANY SPECIFIC FIELDS ---
-    hr_contact = db.Column(db.String(15))
-    website = db.Column(db.String(100))
+    description = db.Column(db.String(255))
+    industry = db.Column(db.String(255))
+    website = db.Column(db.String(255))
+    
+    
+    drives = db.relationship('Drive', backref='company', lazy=True, cascade="all, delete-orphan")
+    applications = db.relationship('Application', backref='student', lazy=True, cascade="all, delete-orphan")
 
-# 2. Placement Drive Table
+
 class Drive(db.Model):
+    __tablename__ = 'drive'
+    
     id = db.Column(db.Integer, primary_key=True)
     company_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    job_title = db.Column(db.String(100), nullable=False)
+    
+    job_title = db.Column(db.String(150), nullable=False)
     description = db.Column(db.Text, nullable=False)
-    eligibility_criteria = db.Column(db.Text)
+    eligibility_criteria = db.Column(db.String(100))
+    
+    
+    ctc = db.Column(db.String(50)) 
+    
     deadline = db.Column(db.String(50))
-    status = db.Column(db.String(20), default='Pending')
+    status = db.Column(db.String(20), default='Pending') # Pending, Approved
+    
+    
+    applications = db.relationship('Application', backref='drive', lazy=True, cascade="all, delete-orphan")
 
-    # this allows drive.company.username to work
-    company = db.relationship('User', backref='drives')
 
-# 3. Updated Application Table
 class Application(db.Model):
+    __tablename__ = 'application'
+    
     id = db.Column(db.Integer, primary_key=True)
-    drive_id = db.Column(db.Integer, db.ForeignKey('drive.id'), nullable=False)
     student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    applied_date = db.Column(db.DateTime, default=datetime.utcnow) # For history tracking 
-    status = db.Column(db.String(20), default='Applied') # Applied, Shortlisted, Selected, Rejected
+    drive_id = db.Column(db.Integer, db.ForeignKey('drive.id'), nullable=False)
     
-    
-    drive = db.relationship('Drive', backref='applications')
-    student = db.relationship('User', backref='my_applications')
+    status = db.Column(db.String(20), default='Applied') # Applied, Accepted, Rejected
