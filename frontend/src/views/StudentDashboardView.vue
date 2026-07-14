@@ -99,6 +99,7 @@
                     <th>Company</th>
                     <th>Role</th>
                     <th>Req. CGPA</th>
+                    <th>Deadline</th> <!-- NEW COLUMN -->
                     <th class="text-end">Action</th>
                   </tr>
                 </thead>
@@ -107,8 +108,12 @@
                     <td class="align-middle fw-bold text-success">{{ drive.company }}</td>
                     <td class="align-middle">{{ drive.job_title }}</td>
                     <td class="align-middle text-warning">{{ drive.eligibility_criteria || 'None' }}</td>
+                    <td class="align-middle" :class="isDeadlinePassed(drive.deadline) ? 'text-danger' : 'text-light'">
+                      {{ drive.deadline || 'N/A' }}
+                    </td>
                     <td class="text-end align-middle">
                       
+                      <!-- 1. Check if already applied -->
                       <button 
                         v-if="hasApplied(drive.id)" 
                         class="btn btn-sm btn-success text-light" 
@@ -117,6 +122,16 @@
                         <i class="bi bi-check-circle me-1"></i> Already Applied
                       </button>
 
+                      <!-- 2. Check if deadline has passed -->
+                      <button 
+                        v-else-if="isDeadlinePassed(drive.deadline)" 
+                        class="btn btn-sm btn-danger text-light" 
+                        disabled
+                      >
+                        <i class="bi bi-x-circle me-1"></i> Deadline Passed
+                      </button>
+
+                      <!-- 3. Check if eligible -->
                       <button 
                         v-else-if="!isEligible(drive.eligibility_criteria)" 
                         class="btn btn-sm btn-outline-secondary" 
@@ -126,6 +141,7 @@
                         Ineligible
                       </button>
 
+                      <!-- 4. Default Apply Button -->
                       <button 
                         v-else 
                         class="btn btn-sm btn-outline-info" 
@@ -143,7 +159,18 @@
         </div>
 
         <div class="col-md-5 mb-4">
-          <h4 class="mb-3">Application Tracker</h4>
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0">Application Tracker</h4>
+            <!-- Export History Button -->
+            <button 
+              class="btn btn-outline-warning btn-sm" 
+              @click="exportHistory"
+              :disabled="isExporting"
+            >
+              {{ isExporting ? 'Exporting...' : 'Export History (CSV)' }}
+            </button>
+          </div>
+          
           <div class="card shadow-sm bg-dark text-light border-secondary">
             <div class="card-body p-0">
               <div v-if="applications.length === 0" class="p-4 text-muted text-center">
@@ -191,6 +218,7 @@ const API_URL = 'http://127.0.0.1:5000/api'
 // --- State Variables ---
 const drives = ref([])
 const applications = ref([])
+const isExporting = ref(false)
 
 // Profile State
 const profile = ref({ full_name: '', branch: '', cgpa: '', contact_info: '' })
@@ -212,7 +240,7 @@ const fetchProfile = async () => {
       headers: { Authorization: `Bearer ${token}` }
     })
     profile.value = res.data
-    editForm.value = { ...res.data } // Pre-fill edit form
+    editForm.value = { ...res.data }
     currentResumeUrl.value = res.data.resume_file || ''
   } catch (error) {
     console.error("Failed to fetch profile", error)
@@ -226,7 +254,6 @@ const saveProfile = async () => {
     await axios.post(`${API_URL}/student/profile`, editForm.value, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    // Update local state without full reload
     profile.value = { ...editForm.value }
     isEditing.value = false
   } catch (error) {
@@ -263,6 +290,18 @@ const fetchApplications = async () => {
 
 // --- Status & Guardrail Logic ---
 
+// NEW: Deadline check function
+const isDeadlinePassed = (deadline) => {
+  if (!deadline) return false
+  
+  // Set today's date to midnight so it compares exactly to the day
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  
+  const driveDeadline = new Date(deadline)
+  return driveDeadline < today
+}
+
 const isEligible = (criteria) => {
   if (!criteria) return true
   if (!profile.value.cgpa) return false 
@@ -286,7 +325,7 @@ const applyForDrive = async (driveId) => {
       headers: { Authorization: `Bearer ${token}` }
     })
     alert("Application submitted successfully!")
-    fetchApplications() // Refresh the tracker instantly
+    fetchApplications()
   } catch (error) {
     alert(error.response?.data?.message || "Failed to apply.")
   }
@@ -316,12 +355,54 @@ const uploadResume = async () => {
     
     currentResumeUrl.value = response.data.resume_url
     alert("Resume uploaded and attached to profile successfully!")
-    selectedFile.value = null // Clear the input
+    selectedFile.value = null
   } catch (error) {
      console.error(error)
      alert(error.response?.data?.message || "Failed to upload resume.")
   } finally {
      isUploading.value = false
+  }
+}
+
+// --- CSV Export Handling (Celery Task) ---
+
+const exportHistory = async () => {
+  isExporting.value = true
+  try {
+    const token = localStorage.getItem('token')
+    
+    const startResponse = await axios.post(`${API_URL}/student/export`, {}, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    
+    const taskId = startResponse.data.task_id
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusResponse = await axios.get(`${API_URL}/student/export_status/${taskId}`)
+        
+        if (statusResponse.data.status === 'Ready') {
+          clearInterval(pollInterval)
+          isExporting.value = false
+          
+          const link = document.createElement('a')
+          link.href = statusResponse.data.download_url
+          link.setAttribute('download', '') 
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+        } 
+      } catch (pollError) {
+        clearInterval(pollInterval)
+        isExporting.value = false
+        alert("The background export task failed.")
+      }
+    }, 2000)
+    
+  } catch (error) {
+    console.error(error)
+    isExporting.value = false
+    alert("Failed to connect to export service.")
   }
 }
 

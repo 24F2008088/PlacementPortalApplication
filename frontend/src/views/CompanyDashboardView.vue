@@ -33,9 +33,6 @@
 
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h4 class="mb-0">Applicant Inbox</h4>
-          <button class="btn btn-outline-warning btn-sm" @click="exportApplicants(1)" :disabled="isExporting">
-            <i class="bi bi-download me-1"></i> {{ isExporting ? 'Exporting...' : 'Export to CSV' }}
-          </button>
         </div>
         
         <div class="card shadow-sm bg-dark text-light border-secondary">
@@ -79,7 +76,7 @@
       </div>
 
       <div v-if="activeTab === 'create'" class="row justify-content-center">
-        <div class="col-md-7">
+        <div class="col-md-8">
           <div class="card shadow-sm p-4 bg-dark text-light border-secondary">
             <h5 class="mb-4 text-info">Create a Placement Drive</h5>
             <form @submit.prevent="createDrive">
@@ -91,16 +88,22 @@
                 <label class="form-label text-muted small">Description</label>
                 <textarea class="form-control bg-dark text-light border-secondary" v-model="form.description" rows="3"></textarea>
               </div>
+              
               <div class="row">
-                <div class="col-md-6 mb-3">
-                  <label class="form-label text-muted small">Min CGPA Requirement</label>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label text-muted small">Min CGPA</label>
                   <input type="number" step="0.1" class="form-control bg-dark text-light border-secondary" v-model="form.min_cgpa" required>
                 </div>
-                <div class="col-md-6 mb-3">
-                  <label class="form-label text-muted small">CTC (in LPA)</label>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label text-muted small">CTC (LPA)</label>
                   <input type="number" step="0.1" class="form-control bg-dark text-light border-secondary" v-model="form.ctc" required>
                 </div>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label text-muted small">Application Deadline</label>
+                  <input type="date" class="form-control bg-dark text-light border-secondary" v-model="form.deadline" required>
+                </div>
               </div>
+              
               <button type="submit" class="btn btn-success w-100 mt-2">Post Drive</button>
             </form>
           </div>
@@ -195,13 +198,13 @@ const activeTab = ref('overview')
 const activeModal = ref(null)
 const selectedStudent = ref(null)
 const modalList = ref([])
-const isExporting = ref(false)
 
 const stats = ref({ total_drives: 0, total_applicants: 0, total_hired: 0 })
 const applicants = ref([])
 const myDrives = ref([])
 
-const form = ref({ role: '', description: '', min_cgpa: '', ctc: '' })
+// Form initialized with deadline
+const form = ref({ role: '', description: '', min_cgpa: '', ctc: '', deadline: '' })
 const companyForm = ref({ description: '', industry: '', website: '' })
 
 const analyticsCards = {
@@ -280,11 +283,11 @@ const createDrive = async () => {
       description: form.value.description,
       eligibility_criteria: form.value.min_cgpa,
       ctc: `${form.value.ctc} LPA`,
-      deadline: '2026-12-31' 
+      deadline: form.value.deadline // Uses the date picker input
     }, { headers: { Authorization: `Bearer ${token}` }})
     
     alert("Drive successfully created and pending admin approval!")
-    form.value = { role: '', description: '', min_cgpa: '', ctc: '' }
+    form.value = { role: '', description: '', min_cgpa: '', ctc: '', deadline: '' }
     activeTab.value = 'overview'
     fetchAllData()
   } catch (error) {
@@ -301,40 +304,6 @@ const updateCompanyProfile = async () => {
     alert("Company profile saved successfully!")
   } catch (error) {
     alert("Failed to update profile.")
-  }
-}
-
-// Background Celery Task Export
-const exportApplicants = async (driveId) => {
-  isExporting.value = true
-  try {
-    const token = localStorage.getItem('token')
-    const startRes = await axios.post(`${API_URL}/company/export/${driveId}`, {}, { headers: { Authorization: `Bearer ${token}` }})
-    const taskId = startRes.data.task_id
-    
-    const pollInterval = setInterval(async () => {
-      try {
-        const statusRes = await axios.get(`${API_URL}/company/export_status/${taskId}`)
-        if (statusRes.data.status === 'Ready') {
-          clearInterval(pollInterval)
-          isExporting.value = false
-          
-          const link = document.createElement('a')
-          link.href = statusRes.data.download_url
-          link.setAttribute('download', '') 
-          document.body.appendChild(link)
-          link.click()
-          link.remove()
-        } 
-      } catch (pollError) {
-        clearInterval(pollInterval)
-        isExporting.value = false
-        alert("Export task failed.")
-      }
-    }, 2000)
-  } catch (error) {
-    isExporting.value = false
-    alert("Failed to start export.")
   }
 }
 

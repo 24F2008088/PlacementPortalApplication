@@ -175,6 +175,10 @@ def approve_drive(current_user, drive_id):
     drive.status = 'Approved'
     db.session.commit()
     cache.delete('approved_drives')
+    
+    # NEW: Alert students that a new drive is available!
+    send_new_drive_alert.delay(drive.company.username, drive.job_title, drive.deadline)
+    
     return jsonify({'message': 'Drive approved successfully!'}), 200
 
 @app.route('/api/admin/reject_drive/<int:drive_id>', methods=['POST'])
@@ -226,6 +230,7 @@ def toggle_blacklist(current_user, user_id):
     
     status = "blacklisted" if user.is_blacklisted else "restored"
     return jsonify({'message': f'User {status} successfully.'}), 200
+
 
 # --- Student Routes ---
 
@@ -350,6 +355,29 @@ def get_my_applications(current_user):
             
     return jsonify(app_data), 200
 
+@app.route('/api/student/export', methods=['POST'])
+@token_required
+def trigger_student_export(current_user):
+    if current_user.role != 'student':
+        return jsonify({'message': 'Access denied.'}), 403
+        
+    task = export_student_applications_task.delay(current_user.id)
+    return jsonify({'message': 'Export started!', 'task_id': task.id}), 202
+
+@app.route('/api/student/export_status/<task_id>', methods=['GET'])
+def get_student_export_status(task_id):
+    task = celery.AsyncResult(task_id)
+    
+    if task.state == 'PENDING' or task.state == 'STARTED':
+        return jsonify({'status': 'Processing'}), 202
+    elif task.state == 'SUCCESS':
+        return jsonify({
+            'status': 'Ready', 
+            'download_url': f"http://127.0.0.1:5000{task.result}"
+        }), 200
+    else:
+        return jsonify({'status': 'Failed'}), 500
+
 
 # --- Company Routes ---
 
@@ -427,8 +455,6 @@ def create_placement_drive(current_user):
     db.session.commit()
     return jsonify({'message': 'Placement drive created and pending admin approval.'}), 201
 
-
-
 @app.route('/api/company/applicants', methods=['GET'])
 @token_required
 def get_company_applicants(current_user):
@@ -498,60 +524,65 @@ def reject_applicant(current_user, application_id):
 # --- Background Tasks & Email Routing ---
 
 celery.conf.beat_schedule = {
-    'daily-reminder-job': {
-        'task': 'send_daily_reminders',
+    'daily-student-reminder-job': {
+        'task': 'app.send_daily_reminders',
         'schedule': crontab(hour=9, minute=0), 
     },
-    'monthly-report-job': {
-        'task': 'generate_monthly_report',
+    'monthly-admin-report-job': {
+        'task': 'app.generate_monthly_report',
         'schedule': crontab(day_of_month=1, hour=10, minute=0), 
     }
 }
 
-@celery.task(name='app.export_applicants_task')
-def export_applicants_task(drive_id):
-    applications = Application.query.filter_by(drive_id=drive_id).all()
+# NEW: Email alert sent to all students when a new drive is approved
+@celery.task(name='app.send_new_drive_alert')
+def send_new_drive_alert(company_name, job_title, deadline):
+    students = User.query.filter_by(role='student').all()
+    if not students:
+        return "No students to notify."
+        
+    subject = f"New Placement Drive: {company_name} is hiring!"
+    body = (
+        f"Great news!\n\n"
+        f"A new placement drive by {company_name} for the role of '{job_title}' has just been approved and is now live.\n"
+        f"The deadline to apply is {deadline}.\n\n"
+        f"Log in to your Student Dashboard to check the eligibility criteria and apply!"
+    )
     
-    filename = f"applicants_drive_{drive_id}_{uuid.uuid4().hex[:6]}.csv"
+    with mail.connect() as conn:
+        for student in students:
+            student_email = f"{student.username.replace(' ', '').lower()}@student.edu"
+            msg = Message(subject, recipients=[student_email], body=body)
+            conn.send(msg)
+            
+    return f"Alert sent to {len(students)} students."
+
+
+@celery.task(name='app.export_student_applications_task')
+def export_student_applications_task(student_id):
+    applications = Application.query.filter_by(student_id=student_id).all()
+    student = User.query.get(student_id)
+    
+    filename = f"application_history_{student.username}_{uuid.uuid4().hex[:6]}.csv"
     filepath = os.path.join(EXPORT_FOLDER, filename)
     
     with open(filepath, 'w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Student Name', 'Status']) 
+        writer.writerow(['Student ID', 'Company Name', 'Drive Title', 'Application Status', 'Date Exported']) 
         
         for app_record in applications:
-            student = User.query.get(app_record.student_id)
-            writer.writerow([student.username, app_record.status])
+            drive = Drive.query.get(app_record.drive_id)
+            company_name = drive.company.username if drive and drive.company else "N/A"
+            drive_title = drive.job_title if drive else "N/A"
+            date_exported = datetime.datetime.now().strftime("%Y-%m-%d") 
+            
+            writer.writerow([student.id, company_name, drive_title, app_record.status, date_exported])
             
     return f"/static/exports/{filename}"
-
-@app.route('/api/company/export/<int:drive_id>', methods=['POST'])
-@token_required
-def trigger_company_export(current_user, drive_id):
-    if current_user.role != 'company':
-        return jsonify({'message': 'Access denied.'}), 403
-        
-    task = export_applicants_task.delay(drive_id)
-    return jsonify({'message': 'Export started!', 'task_id': task.id}), 202
-
-@app.route('/api/company/export_status/<task_id>', methods=['GET'])
-def get_export_status(task_id):
-    task = celery.AsyncResult(task_id)
-    
-    if task.state == 'PENDING' or task.state == 'STARTED':
-        return jsonify({'status': 'Processing'}), 202
-    elif task.state == 'SUCCESS':
-        return jsonify({
-            'status': 'Ready', 
-            'download_url': f"http://127.0.0.1:5000{task.result}"
-        }), 200
-    else:
-        return jsonify({'status': 'Failed'}), 500
     
 @celery.task(name='app.send_status_email')
 def send_status_email(student_username, company_name, job_title, status):
     student_email = f"{student_username.replace(' ', '').lower()}@student.edu"
-    
     subject = f"Application Update: {company_name} - {job_title}"
     body = f"Hello {student_username},\n\nYour application for the role of {job_title} at {company_name} has been marked as: {status}.\n\nLog in to your dashboard to view more details."
     
@@ -562,25 +593,48 @@ def send_status_email(student_username, company_name, job_title, status):
 
 @celery.task(name='app.send_daily_reminders')
 def send_daily_reminders():
-    pending_companies = User.query.filter_by(role='company', is_approved=False).count()
-    pending_drives = Drive.query.filter_by(status='Pending').count()
+    active_drives = Drive.query.filter_by(status='Approved').all()
+    if not active_drives:
+        return "No active drives. Reminders skipped."
+
+    students = User.query.filter_by(role='student').all()
+    drive_list_text = "\n".join([f"- {d.company.username}: {d.job_title} (Deadline: {d.deadline})" for d in active_drives])
     
-    if pending_companies > 0 or pending_drives > 0:
-        subject = "Daily Admin Digest: Pending Approvals"
-        body = (
-            f"Good morning Admin,\n\n"
-            f"You have items waiting in the queue that require your approval:\n"
-            f"- {pending_companies} Pending Companies\n"
-            f"- {pending_drives} Pending Placement Drives\n\n"
-            f"Please log in to your Command Center to review them."
-        )
-        
-        msg = Message(subject, recipients=['admin@placementportal.com'])
-        msg.body = body
-        mail.send(msg)
-        return f"Daily reminder sent: {pending_companies} companies, {pending_drives} drives."
+    with mail.connect() as conn:
+        for student in students:
+            student_email = f"{student.username.replace(' ', '').lower()}@student.edu"
+            subject = "Daily Reminder: Upcoming Placement Deadlines"
+            body = f"Hello {student.full_name or student.username},\n\nDon't forget to apply for these active placement drives before they close:\n\n{drive_list_text}\n\nLog into your dashboard to apply!"
+            
+            msg = Message(subject, recipients=[student_email], body=body)
+            conn.send(msg)
+            
+    return f"Daily reminders sent to {len(students)} students."
+
+@celery.task(name='app.generate_monthly_report')
+def generate_monthly_report():
+    total_drives = Drive.query.count()
+    total_applications = Application.query.count()
+    total_selected = Application.query.filter_by(status='Accepted').count()
     
-    return "No pending approvals today. Email skipped."
+    subject = "Monthly Placement Activity Report"
+    
+    html_body = f"""
+    <h2>Monthly Placement Activity Report</h2>
+    <p>Here is the summary of the institute's placement activities for this month:</p>
+    <ul>
+        <li><strong>Total Drives Conducted:</strong> {total_drives}</li>
+        <li><strong>Total Students Applied:</strong> {total_applications}</li>
+        <li><strong>Total Students Selected:</strong> {total_selected}</li>
+    </ul>
+    <p>Log in to the Admin Command Center for more details.</p>
+    """
+    
+    msg = Message(subject, recipients=['admin@placementportal.com'])
+    msg.html = html_body
+    mail.send(msg)
+    
+    return "Monthly HTML report sent to admin."
 
 
 # --- Authentication Routes ---
