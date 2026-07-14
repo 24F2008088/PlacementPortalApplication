@@ -192,6 +192,40 @@ def reject_drive(current_user, drive_id):
     cache.delete('approved_drives')
     return jsonify({'message': 'Drive rejected and removed.'}), 200
 
+@app.route('/api/admin/users', methods=['GET'])
+@token_required
+def get_all_users(current_user):
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+    
+    # Fetch everyone except the admin
+    users = User.query.filter(User.role != 'admin').all()
+    user_data = [{
+        'id': u.id,
+        'username': u.username,
+        'role': u.role,
+        'is_approved': u.is_approved,
+        'is_blacklisted': u.is_blacklisted
+    } for u in users]
+    
+    return jsonify(user_data), 200
+
+@app.route('/api/admin/toggle_blacklist/<int:user_id>', methods=['POST'])
+@token_required
+def toggle_blacklist(current_user, user_id):
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'message': 'User not found.'}), 404
+        
+    # Flip the boolean status
+    user.is_blacklisted = not user.is_blacklisted
+    db.session.commit()
+    
+    status = "blacklisted" if user.is_blacklisted else "restored"
+    return jsonify({'message': f'User {status} successfully.'}), 200
 
 # --- Student Routes ---
 
