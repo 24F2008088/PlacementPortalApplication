@@ -176,7 +176,7 @@ def approve_drive(current_user, drive_id):
     db.session.commit()
     cache.delete('approved_drives')
     
-    # NEW: Alert students that a new drive is available!
+    
     send_new_drive_alert.delay(drive.company.username, drive.job_title, drive.deadline)
     
     return jsonify({'message': 'Drive approved successfully!'}), 200
@@ -231,6 +231,47 @@ def toggle_blacklist(current_user, user_id):
     status = "blacklisted" if user.is_blacklisted else "restored"
     return jsonify({'message': f'User {status} successfully.'}), 200
 
+
+@app.route('/api/admin/all_drives', methods=['GET'])
+@token_required
+def admin_all_drives(current_user):
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    drives = Drive.query.all()
+    drives_data = [{
+        'id': d.id,
+        'company': d.company.username if d.company else 'Unknown',
+        'job_title': d.job_title,
+        'ctc': d.ctc,
+        'deadline': d.deadline,
+        'status': d.status
+    } for d in drives]
+    
+    return jsonify(drives_data), 200
+
+@app.route('/api/admin/all_applications', methods=['GET'])
+@token_required
+def admin_all_applications(current_user):
+    if current_user.role != 'admin':
+        return jsonify({'message': 'Access denied. Admins only.'}), 403
+        
+    apps = Application.query.all()
+    app_data = []
+    
+    for app_record in apps:
+        student = User.query.get(app_record.student_id)
+        drive = Drive.query.get(app_record.drive_id)
+        
+        app_data.append({
+            'id': app_record.id,
+            'student_name': student.username if student else 'Unknown',
+            'company_name': drive.company.username if drive and drive.company else 'Unknown',
+            'job_title': drive.job_title if drive else 'Unknown',
+            'status': app_record.status
+        })
+        
+    return jsonify(app_data), 200
 
 # --- Student Routes ---
 
@@ -455,6 +496,26 @@ def create_placement_drive(current_user):
     db.session.commit()
     return jsonify({'message': 'Placement drive created and pending admin approval.'}), 201
 
+@app.route('/api/company/close_drive/<int:drive_id>', methods=['POST'])
+@token_required
+def close_drive(current_user, drive_id):
+    if current_user.role != 'company':
+        return jsonify({'message': 'Access denied.'}), 403
+        
+    drive = Drive.query.get(drive_id)
+    
+    
+    if not drive or drive.company_id != current_user.id:
+        return jsonify({'message': 'Drive not found.'}), 404
+        
+    drive.status = 'Closed'
+    db.session.commit()
+    
+    
+    cache.delete('approved_drives')
+    
+    return jsonify({'message': 'Drive closed successfully!'}), 200
+
 @app.route('/api/company/applicants', methods=['GET'])
 @token_required
 def get_company_applicants(current_user):
@@ -534,7 +595,7 @@ celery.conf.beat_schedule = {
     }
 }
 
-# NEW: Email alert sent to all students when a new drive is approved
+
 @celery.task(name='app.send_new_drive_alert')
 def send_new_drive_alert(company_name, job_title, deadline):
     students = User.query.filter_by(role='student').all()

@@ -1,10 +1,10 @@
 <template>
   <div class="container d-flex justify-content-center align-items-center vh-100">
-    <!-- Added border-secondary for a cleaner dark mode look -->
+    
     <div class="card shadow-lg p-4 bg-dark text-light border-secondary" style="width: 25rem;">
       <h3 class="text-center mb-4">{{ isRegistering ? 'Create Account' : 'Welcome Back' }}</h3>
       
-      <!-- Alerts -->
+      
       <div v-if="errorMessage" class="alert alert-danger">{{ errorMessage }}</div>
       <div v-if="successMessage" class="alert alert-success">{{ successMessage }}</div>
 
@@ -24,7 +24,7 @@
           <select class="form-select" v-model="role">
             <option value="student">Student</option>
             <option value="company">Company</option>
-            <option value="admin">Admin</option>
+            
           </select>
         </div>
 

@@ -99,7 +99,7 @@
                     <th>Company</th>
                     <th>Role</th>
                     <th>Req. CGPA</th>
-                    <th>Deadline</th> <!-- NEW COLUMN -->
+                    <th>Deadline</th> 
                     <th class="text-end">Action</th>
                   </tr>
                 </thead>
@@ -113,7 +113,7 @@
                     </td>
                     <td class="text-end align-middle">
                       
-                      <!-- 1. Check if already applied -->
+                      
                       <button 
                         v-if="hasApplied(drive.id)" 
                         class="btn btn-sm btn-success text-light" 
@@ -122,7 +122,7 @@
                         <i class="bi bi-check-circle me-1"></i> Already Applied
                       </button>
 
-                      <!-- 2. Check if deadline has passed -->
+                      
                       <button 
                         v-else-if="isDeadlinePassed(drive.deadline)" 
                         class="btn btn-sm btn-danger text-light" 
@@ -131,7 +131,7 @@
                         <i class="bi bi-x-circle me-1"></i> Deadline Passed
                       </button>
 
-                      <!-- 3. Check if eligible -->
+                      
                       <button 
                         v-else-if="!isEligible(drive.eligibility_criteria)" 
                         class="btn btn-sm btn-outline-secondary" 
@@ -141,7 +141,7 @@
                         Ineligible
                       </button>
 
-                      <!-- 4. Default Apply Button -->
+                      
                       <button 
                         v-else 
                         class="btn btn-sm btn-outline-info" 
@@ -161,7 +161,7 @@
         <div class="col-md-5 mb-4">
           <div class="d-flex justify-content-between align-items-center mb-3">
             <h4 class="mb-0">Application Tracker</h4>
-            <!-- Export History Button -->
+            
             <button 
               class="btn btn-outline-warning btn-sm" 
               @click="exportHistory"
@@ -215,18 +215,18 @@ import axios from 'axios'
 const router = useRouter()
 const API_URL = 'http://127.0.0.1:5000/api'
 
-// --- State Variables ---
+
 const drives = ref([])
 const applications = ref([])
 const isExporting = ref(false)
 
-// Profile State
+
 const profile = ref({ full_name: '', branch: '', cgpa: '', contact_info: '' })
 const editForm = ref({ full_name: '', branch: '', cgpa: '', contact_info: '' })
 const isEditing = ref(false)
 const isSaving = ref(false)
 
-// Resume State
+
 const selectedFile = ref(null)
 const isUploading = ref(false)
 const currentResumeUrl = ref('') 
@@ -290,11 +290,11 @@ const fetchApplications = async () => {
 
 // --- Status & Guardrail Logic ---
 
-// NEW: Deadline check function
+
 const isDeadlinePassed = (deadline) => {
   if (!deadline) return false
   
-  // Set today's date to midnight so it compares exactly to the day
+  
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   
@@ -406,7 +406,7 @@ const exportHistory = async () => {
   }
 }
 
-// --- Lifecycle ---
+
 
 const handleLogout = () => {
   localStorage.removeItem('token')

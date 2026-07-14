@@ -1,31 +1,25 @@
 <template>
   <div class="bg-dark text-light min-vh-100 pb-5">
-    <!-- Navbar -->
     <nav class="navbar navbar-expand-lg bg-dark border-bottom border-secondary mb-4 shadow-sm">
       <div class="container">
-        <span class="navbar-brand fw-bold text-primary">Placement Portal V2 | Admin Command Center</span>
+        <span class="navbar-brand fw-bold text-primary">Placement Portal  |  Admin Command Center</span>
         <button class="btn btn-outline-danger btn-sm" @click="handleLogout">Logout</button>
       </div>
     </nav>
 
     <div class="container">
       
-      <!-- Tabbed Navigation -->
       <ul class="nav nav-tabs mb-4 border-secondary">
         <li class="nav-item">
           <button class="nav-link text-light border-secondary" :class="{ 'active bg-secondary fw-bold': activeTab === 'overview' }" @click="activeTab = 'overview'">Dashboard & Analytics</button>
         </li>
         <li class="nav-item">
-          <button class="nav-link text-light border-secondary" :class="{ 'active bg-secondary fw-bold': activeTab === 'users' }" @click="activeTab = 'users'">User Management</button>
+          <button class="nav-link text-light border-secondary" :class="{ 'active bg-secondary fw-bold': activeTab === 'management' }" @click="activeTab = 'management'">Management</button>
         </li>
       </ul>
 
-      <!-- ========================================== -->
-      <!-- TAB 1: OVERVIEW & ANALYTICS                -->
-      <!-- ========================================== -->
       <div v-if="activeTab === 'overview'">
         
-        <!-- 1. "At-a-Glance" Metric Cards -->
         <div class="row mb-4">
           <div class="col-md-3">
             <div class="card shadow-sm text-center bg-dark text-light border-secondary py-3">
@@ -53,7 +47,6 @@
           </div>
         </div>
 
-        <!-- 2. The Analytics Chart -->
         <div class="row mb-5">
           <div class="col-12">
             <div class="card shadow-sm bg-dark border-secondary">
@@ -66,9 +59,7 @@
           </div>
         </div>
 
-        <!-- 3. Pending Approvals -->
         <div class="row">
-          <!-- Pending Companies -->
           <div class="col-md-6 mb-4">
             <div class="card shadow-sm bg-dark text-light border-secondary">
               <div class="card-header border-secondary fw-bold text-warning">Pending Company Approvals</div>
@@ -89,7 +80,6 @@
             </div>
           </div>
 
-          <!-- Pending Drives -->
           <div class="col-md-6 mb-4">
             <div class="card shadow-sm bg-dark text-light border-secondary">
               <div class="card-header border-secondary fw-bold text-info">Pending Drive Approvals</div>
@@ -112,102 +102,129 @@
         </div>
       </div>
 
-      <!-- ========================================== -->
-      <!-- TAB 2: USER MANAGEMENT & BLACKLISTING      -->
-      <!-- ========================================== -->
-      <div v-if="activeTab === 'users'">
+      <div v-if="activeTab === 'management'">
         
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h4 class="mb-0 text-light">Platform Users</h4>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+          <div class="btn-group shadow-sm">
+            <button class="btn" :class="subTab === 'users' ? 'btn-primary fw-bold' : 'btn-outline-primary'" @click="subTab = 'users'">Users</button>
+            <button class="btn" :class="subTab === 'drives' ? 'btn-info fw-bold' : 'btn-outline-info'" @click="subTab = 'drives'">All Drives</button>
+            <button class="btn" :class="subTab === 'apps' ? 'btn-warning fw-bold' : 'btn-outline-warning'" @click="subTab = 'apps'">All Applications</button>
+          </div>
           
-          <!-- SEARCH & REFRESH CONTROLS -->
-          <div class="d-flex gap-2">
-            <input 
-              type="text" 
-              class="form-control form-control-sm bg-dark text-light border-secondary" 
-              v-model="searchQuery" 
-              placeholder="Search by username..."
-              style="width: 250px;"
-            >
-            <button class="btn btn-sm btn-outline-light text-nowrap" @click="fetchUsers">Refresh Lists</button>
+          <button class="btn btn-sm btn-outline-light" @click="refreshManagementData">
+            <i class="bi bi-arrow-clockwise me-1"></i> Refresh Data
+          </button>
+        </div>
+
+        <div v-if="subTab === 'users'">
+          <div class="d-flex justify-content-end mb-3">
+            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" v-model="searchQuery" placeholder="Search by username..." style="width: 250px;">
+          </div>
+
+          <h5 class="mb-3 text-info">Student Accounts</h5>
+          <div class="card shadow-sm bg-dark text-light border-secondary mb-5">
+            <div class="card-body p-0">
+              <div v-if="studentsList.length === 0" class="p-4 text-muted text-center">{{ searchQuery ? 'No students match your search.' : 'No students registered yet.' }}</div>
+              <table v-else class="table table-dark table-hover mb-0">
+                <thead><tr><th>Username</th><th>Approval Status</th><th class="text-end">Account Action</th></tr></thead>
+                <tbody>
+                  <tr v-for="user in studentsList" :key="user.id">
+                    <td class="align-middle fw-bold" :class="user.is_blacklisted ? 'text-decoration-line-through text-muted' : 'text-light'">{{ user.username }}</td>
+                    <td class="align-middle">
+                      <span v-if="user.is_approved" class="badge bg-success">Approved</span>
+                      <span v-else class="badge bg-warning text-dark">Pending</span>
+                    </td>
+                    <td class="text-end align-middle">
+                      <button class="btn btn-sm" :class="user.is_blacklisted ? 'btn-outline-success' : 'btn-danger'" @click="toggleBlacklist(user.id)">{{ user.is_blacklisted ? 'Restore Access' : 'Blacklist' }}</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <h5 class="mb-3 text-warning">Company Accounts</h5>
+          <div class="card shadow-sm bg-dark text-light border-secondary mb-4">
+            <div class="card-body p-0">
+              <div v-if="companiesList.length === 0" class="p-4 text-muted text-center">{{ searchQuery ? 'No companies match your search.' : 'No companies registered yet.' }}</div>
+              <table v-else class="table table-dark table-hover mb-0">
+                <thead><tr><th>Company Name</th><th>Approval Status</th><th class="text-end">Account Action</th></tr></thead>
+                <tbody>
+                  <tr v-for="user in companiesList" :key="user.id">
+                    <td class="align-middle fw-bold" :class="user.is_blacklisted ? 'text-decoration-line-through text-muted' : 'text-light'">{{ user.username }}</td>
+                    <td class="align-middle">
+                      <span v-if="user.is_approved" class="badge bg-success">Approved</span>
+                      <span v-else class="badge bg-warning text-dark">Pending</span>
+                    </td>
+                    <td class="text-end align-middle">
+                      <button class="btn btn-sm" :class="user.is_blacklisted ? 'btn-outline-success' : 'btn-danger'" @click="toggleBlacklist(user.id)">{{ user.is_blacklisted ? 'Restore Access' : 'Blacklist' }}</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
-        <!-- Student Database Table -->
-        <h5 class="mt-4 mb-3 text-info">Student Accounts</h5>
-        <div class="card shadow-sm bg-dark text-light border-secondary mb-5">
-          <div class="card-body p-0">
-            <div v-if="studentsList.length === 0" class="p-4 text-muted text-center">
-              {{ searchQuery ? 'No students match your search.' : 'No students registered yet.' }}
+        <div v-if="subTab === 'drives'">
+          <div class="card shadow-sm bg-dark text-light border-secondary mb-4">
+            <div class="card-header border-secondary fw-bold text-info">Platform Drive Database</div>
+            <div class="card-body p-0">
+              <div v-if="allDrives.length === 0" class="p-4 text-muted text-center">No placement drives exist on the platform.</div>
+              <table v-else class="table table-dark table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Job Title</th>
+                    <th>CTC</th>
+                    <th>Deadline</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="drive in allDrives" :key="drive.id">
+                    <td class="align-middle text-warning fw-bold">{{ drive.company }}</td>
+                    <td class="align-middle">{{ drive.job_title }}</td>
+                    <td class="align-middle">{{ drive.ctc || 'N/A' }}</td>
+                    <td class="align-middle">{{ drive.deadline || 'N/A' }}</td>
+                    <td class="align-middle">
+                      <span class="badge" :class="{'bg-success': drive.status === 'Approved', 'bg-secondary': drive.status === 'Pending'}">{{ drive.status }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <table v-else class="table table-dark table-hover mb-0">
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Approval Status</th>
-                  <th class="text-end">Account Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in studentsList" :key="user.id">
-                  <td class="align-middle fw-bold" :class="user.is_blacklisted ? 'text-decoration-line-through text-muted' : 'text-light'">
-                    {{ user.username }}
-                  </td>
-                  <td class="align-middle">
-                    <span v-if="user.is_approved" class="badge bg-success">Approved</span>
-                    <span v-else class="badge bg-warning text-dark">Pending</span>
-                  </td>
-                  <td class="text-end align-middle">
-                    <button 
-                      class="btn btn-sm" 
-                      :class="user.is_blacklisted ? 'btn-outline-success' : 'btn-danger'"
-                      @click="toggleBlacklist(user.id)"
-                    >
-                      {{ user.is_blacklisted ? 'Restore Access' : 'Blacklist Student' }}
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
 
-        <!-- Company Database Table -->
-        <h5 class="mb-3 text-warning">Company Accounts</h5>
-        <div class="card shadow-sm bg-dark text-light border-secondary mb-4">
-          <div class="card-body p-0">
-            <div v-if="companiesList.length === 0" class="p-4 text-muted text-center">
-              {{ searchQuery ? 'No companies match your search.' : 'No companies registered yet.' }}
+        <div v-if="subTab === 'apps'">
+          <div class="card shadow-sm bg-dark text-light border-secondary mb-4">
+            <div class="card-header border-secondary fw-bold text-warning">Platform Application Database</div>
+            <div class="card-body p-0">
+              <div v-if="allApplications.length === 0" class="p-4 text-muted text-center">No students have applied to any drives yet.</div>
+              <table v-else class="table table-dark table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Student Username</th>
+                    <th>Target Company</th>
+                    <th>Job Title</th>
+                    <th>Current Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="app in allApplications" :key="app.id">
+                    <td class="align-middle text-info fw-bold">{{ app.student_name }}</td>
+                    <td class="align-middle text-warning">{{ app.company_name }}</td>
+                    <td class="align-middle">{{ app.job_title }}</td>
+                    <td class="align-middle">
+                      <span class="badge" :class="{'bg-secondary': app.status === 'Applied', 'bg-success': app.status === 'Accepted', 'bg-danger': app.status === 'Rejected'}">
+                        {{ app.status }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <table v-else class="table table-dark table-hover mb-0">
-              <thead>
-                <tr>
-                  <th>Company Name</th>
-                  <th>Approval Status</th>
-                  <th class="text-end">Account Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in companiesList" :key="user.id">
-                  <td class="align-middle fw-bold" :class="user.is_blacklisted ? 'text-decoration-line-through text-muted' : 'text-light'">
-                    {{ user.username }}
-                  </td>
-                  <td class="align-middle">
-                    <span v-if="user.is_approved" class="badge bg-success">Approved</span>
-                    <span v-else class="badge bg-warning text-dark">Pending</span>
-                  </td>
-                  <td class="text-end align-middle">
-                    <button 
-                      class="btn btn-sm" 
-                      :class="user.is_blacklisted ? 'btn-outline-success' : 'btn-danger'"
-                      @click="toggleBlacklist(user.id)"
-                    >
-                      {{ user.is_blacklisted ? 'Restore Access' : 'Blacklist Company' }}
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
 
@@ -231,14 +248,22 @@ const API_URL = 'http://127.0.0.1:5000/api'
 
 // --- State Variables ---
 const activeTab = ref('overview')
+const subTab = ref('users') 
+
 const pendingCompanies = ref([])
 const pendingDrives = ref([])
+
+// Management Data
 const usersList = ref([])
-const searchQuery = ref('') // NEW: Tracks the search input
+const allDrives = ref([])
+const allApplications = ref([])
+const searchQuery = ref('') 
+
+// Chart Data
 const isChartLoaded = ref(false)
 const rawStats = ref({ total_students: 0, total_companies: 0, total_drives: 0, total_applications: 0 })
 
-// --- Computed Properties (Now with Search Logic!) ---
+// --- Computed Properties ---
 const studentsList = computed(() => {
   let filtered = usersList.value.filter(user => user.role === 'student')
   if (searchQuery.value) {
@@ -310,21 +335,32 @@ const fetchPending = async () => {
   }
 }
 
-const fetchUsers = async () => {
+// Master function to fetch all management databases
+const refreshManagementData = async () => {
   try {
     const token = localStorage.getItem('token')
-    const res = await axios.get(`${API_URL}/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
-    usersList.value = res.data
+    const config = { headers: { Authorization: `Bearer ${token}` } }
+    
+    const [usersRes, drivesRes, appsRes] = await Promise.all([
+      axios.get(`${API_URL}/admin/users`, config),
+      axios.get(`${API_URL}/admin/all_drives`, config),
+      axios.get(`${API_URL}/admin/all_applications`, config)
+    ])
+    
+    usersList.value = usersRes.data
+    allDrives.value = drivesRes.data
+    allApplications.value = appsRes.data
   } catch (error) {
-    console.error("Failed to fetch user list", error)
+    console.error("Failed to fetch management databases.", error)
   }
 }
 
+// Action Handlers
 const handleCompany = async (id, action) => {
   try {
     const token = localStorage.getItem('token')
     await axios.post(`${API_URL}/admin/${action}_company/${id}`, {}, { headers: { Authorization: `Bearer ${token}` } })
-    fetchPending(); fetchStats(); fetchUsers();
+    fetchPending(); fetchStats(); refreshManagementData();
   } catch (error) {
     alert(`Failed to ${action} company.`)
   }
@@ -334,7 +370,7 @@ const handleDrive = async (id, action) => {
   try {
     const token = localStorage.getItem('token')
     await axios.post(`${API_URL}/admin/${action}_drive/${id}`, {}, { headers: { Authorization: `Bearer ${token}` } })
-    fetchPending(); fetchStats();
+    fetchPending(); fetchStats(); refreshManagementData();
   } catch (error) {
     alert(`Failed to ${action} drive.`)
   }
@@ -344,7 +380,7 @@ const toggleBlacklist = async (id) => {
   try {
     const token = localStorage.getItem('token')
     await axios.post(`${API_URL}/admin/toggle_blacklist/${id}`, {}, { headers: { Authorization: `Bearer ${token}` } })
-    fetchUsers() 
+    refreshManagementData() 
   } catch (error) {
     alert("Failed to change user status.")
   }
@@ -360,6 +396,6 @@ const handleLogout = () => {
 onMounted(() => {
   fetchStats()
   fetchPending()
-  fetchUsers()
+  refreshManagementData()
 })
 </script>

@@ -1,5 +1,6 @@
 <template>
   <div class="bg-dark text-light min-vh-100 pb-5">
+    <!-- Navbar -->
     <nav class="navbar navbar-expand-lg bg-dark border-bottom border-secondary mb-4 shadow-sm">
       <div class="container">
         <span class="navbar-brand fw-bold text-success">Placement Portal V2 | Company Partner</span>
@@ -8,20 +9,23 @@
     </nav>
 
     <div class="container">
+      <!-- Tab Navigation -->
       <ul class="nav nav-tabs mb-4 border-secondary">
         <li class="nav-item">
           <button class="nav-link text-light border-secondary" :class="{ 'active bg-secondary fw-bold': activeTab === 'overview' }" @click="activeTab = 'overview'">Dashboard & Inbox</button>
         </li>
         <li class="nav-item">
-          <button class="nav-link text-light border-secondary" :class="{ 'active bg-secondary fw-bold': activeTab === 'create' }" @click="activeTab = 'create'">Post a New Job</button>
+          <button class="nav-link text-light border-secondary" :class="{ 'active bg-secondary fw-bold': activeTab === 'drives' }" @click="activeTab = 'drives'">Drives</button>
         </li>
         <li class="nav-item">
           <button class="nav-link text-light border-secondary" :class="{ 'active bg-secondary fw-bold': activeTab === 'profile' }" @click="activeTab = 'profile'">Company Profile</button>
         </li>
       </ul>
 
+
       <div v-if="activeTab === 'overview'">
         
+        <!-- Interactive Analytics Cards -->
         <div class="row mb-4">
           <div class="col-md-4" v-for="(card, key) in analyticsCards" :key="key">
             <div class="card shadow-sm text-center bg-dark text-light border-secondary py-3" @click="openInfoModal(key)" style="cursor: pointer; transition: 0.2s;" onmouseover="this.classList.add('bg-secondary')" onmouseout="this.classList.remove('bg-secondary')">
@@ -31,6 +35,7 @@
           </div>
         </div>
 
+        <!-- Applicant Inbox -->
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h4 class="mb-0">Applicant Inbox</h4>
         </div>
@@ -63,9 +68,10 @@
                     <button class="btn btn-sm btn-outline-light" @click="openProfileModal(app)">View Profile</button>
                   </td>
                   <td class="align-middle text-end">
-                    <div v-if="app.status === 'Applied'" class="btn-group">
-                      <button class="btn btn-outline-success btn-sm" @click="updateStatus(app.application_id, 'accept')">Accept</button>
-                      <button class="btn btn-outline-danger btn-sm" @click="updateStatus(app.application_id, 'reject')">Reject</button>
+                  
+                    <div class="btn-group">
+                      <button class="btn btn-sm" :class="app.status === 'Accepted' ? 'btn-success' : 'btn-outline-success'" @click="updateStatus(app.application_id, 'accept')">Accept</button>
+                      <button class="btn btn-sm" :class="app.status === 'Rejected' ? 'btn-danger' : 'btn-outline-danger'" @click="updateStatus(app.application_id, 'reject')">Reject</button>
                     </div>
                   </td>
                 </tr>
@@ -75,9 +81,12 @@
         </div>
       </div>
 
-      <div v-if="activeTab === 'create'" class="row justify-content-center">
-        <div class="col-md-8">
-          <div class="card shadow-sm p-4 bg-dark text-light border-secondary">
+ 
+      <div v-if="activeTab === 'drives'" class="row justify-content-center">
+        <div class="col-md-10">
+          
+          
+          <div class="card shadow-sm p-4 bg-dark text-light border-secondary mb-5">
             <h5 class="mb-4 text-info">Create a Placement Drive</h5>
             <form @submit.prevent="createDrive">
               <div class="mb-3">
@@ -107,9 +116,49 @@
               <button type="submit" class="btn btn-success w-100 mt-2">Post Drive</button>
             </form>
           </div>
+
+        
+          <h5 class="mb-3">Manage Active Drives</h5>
+          <div class="card shadow-sm bg-dark text-light border-secondary mb-4">
+            <div class="card-body p-0">
+              <div v-if="myDrives.length === 0" class="p-4 text-muted text-center">
+                You haven't created any drives yet.
+              </div>
+              <table v-else class="table table-dark table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Job Title</th>
+                    <th>Current Status</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="drive in myDrives" :key="drive.id">
+                    <td class="align-middle fw-bold">{{ drive.job_title }}</td>
+                    <td class="align-middle">
+                      <span class="badge" :class="{'bg-success': drive.status === 'Approved', 'bg-secondary': drive.status === 'Pending', 'bg-danger': drive.status === 'Closed'}">
+                        {{ drive.status }}
+                      </span>
+                    </td>
+                    <td class="align-middle text-end">
+                      <button 
+                        class="btn btn-sm btn-outline-danger" 
+                        @click="closeDrive(drive.id)" 
+                        :disabled="drive.status === 'Closed'"
+                      >
+                        {{ drive.status === 'Closed' ? 'Drive Closed' : 'Close Drive' }}
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
       </div>
 
+ 
       <div v-if="activeTab === 'profile'" class="row justify-content-center">
         <div class="col-md-7">
           <div class="card shadow-sm p-4 bg-dark text-light border-secondary">
@@ -134,6 +183,7 @@
       </div>
 
     </div>
+
 
     <div v-if="activeModal" class="modal-backdrop fade show" style="background-color: rgba(0,0,0,0.7);"></div>
     <div v-if="activeModal" class="modal fade show d-block" tabindex="-1">
@@ -203,7 +253,6 @@ const stats = ref({ total_drives: 0, total_applicants: 0, total_hired: 0 })
 const applicants = ref([])
 const myDrives = ref([])
 
-// Form initialized with deadline
 const form = ref({ role: '', description: '', min_cgpa: '', ctc: '', deadline: '' })
 const companyForm = ref({ description: '', industry: '', website: '' })
 
@@ -269,7 +318,7 @@ const updateStatus = async (applicationId, action) => {
     await axios.post(`${API_URL}/company/${action}_applicant/${applicationId}`, {}, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    fetchAllData() // Refresh everything
+    fetchAllData()
   } catch (error) {
     console.error(`Failed to ${action} student.`)
   }
@@ -283,15 +332,29 @@ const createDrive = async () => {
       description: form.value.description,
       eligibility_criteria: form.value.min_cgpa,
       ctc: `${form.value.ctc} LPA`,
-      deadline: form.value.deadline // Uses the date picker input
+      deadline: form.value.deadline 
     }, { headers: { Authorization: `Bearer ${token}` }})
     
     alert("Drive successfully created and pending admin approval!")
     form.value = { role: '', description: '', min_cgpa: '', ctc: '', deadline: '' }
-    activeTab.value = 'overview'
     fetchAllData()
   } catch (error) {
     alert("Failed to create drive.")
+  }
+}
+
+
+const closeDrive = async (id) => {
+  if(!confirm("Are you sure you want to close this drive? Students will no longer be able to apply.")) return;
+  
+  try {
+    const token = localStorage.getItem('token')
+    await axios.post(`${API_URL}/company/close_drive/${id}`, {}, { 
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    fetchAllData() 
+  } catch (error) {
+    alert("Failed to close drive.")
   }
 }
 
@@ -307,7 +370,6 @@ const updateCompanyProfile = async () => {
   }
 }
 
-// --- Lifecycle ---
 onMounted(() => {
   fetchAllData()
 })
